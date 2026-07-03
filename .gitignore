@@ -1,84 +1,34 @@
 ```
-# Python
+# Dependencies
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Virtual environments
-venv/
-ENV/
 env/
+venv/
 .venv/
-.env/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# Logs
-*.log
-logs/
-
-# Environment variables
 .env
 .env.local
 .env.*
-
-# Coverage reports
+.venv/
+.ENV
+.venv.bak/
+.python-version
+.pytest_cache/
+.mypy_cache/
 .coverage
 htmlcov/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.tox/
 .coverage.*
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Pytest
-.pytest_cache/
-
-# MyPy
-.mypy_cache/
-
-# Docker
-.dockerignore
+# Logs
+*.log
 
 # OS generated files
 .DS_Store
@@ -88,4 +38,11 @@ MANIFEST
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 ```
