@@ -1,0 +1,88 @@
+"""OpenAI AI Provider implementation."""
+
+from typing import Dict, Any, List
+from app.ai.providers.base import BaseAIProvider
+
+
+class OpenAIProvider(BaseAIProvider):
+    """OpenAI AI provider implementation."""
+
+    def __init__(self, api_key: str = None, base_url: str = "https://api.openai.com/v1"):
+        super().__init__(api_key, base_url)
+
+    @property
+    def name(self) -> str:
+        return "openai"
+
+    async def analyze_news(self, content: str, prompt: str) -> Dict[str, Any]:
+        """Analyze news article using OpenAI."""
+        payload = {
+            "model": self.model_name or "gpt-4-turbo",
+            "messages": [
+                {"role": "system", "content": "You are a crypto news analyst. Respond in JSON format."},
+                {"role": "user", "content": f"{prompt}\n\nArticle:\n{content}"}
+            ],
+            "temperature": 0.3,
+            "max_tokens": 1024,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        response = await self._make_request("/chat/completions", payload, headers)
+        return self._parse_response(response)
+
+    async def generate_digest(self, news_items: List[Dict], prompt: str) -> Dict[str, Any]:
+        """Generate daily digest using OpenAI."""
+        news_text = "\n\n".join([
+            f"{i+1}. {item.get('title', '')}\n   Summary: {item.get('summary', '')}"
+            for i, item in enumerate(news_items)
+        ])
+
+        payload = {
+            "model": self.model_name or "gpt-4-turbo",
+            "messages": [
+                {"role": "system", "content": "You are a crypto news summarizer. Respond in JSON format."},
+                {"role": "user", "content": f"{prompt}\n\nNews Items:\n{news_text}"}
+            ],
+            "temperature": 0.5,
+            "max_tokens": 2048,
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        response = await self._make_request("/chat/completions", payload, headers)
+        return self._parse_response(response)
+
+    async def test_connection(self) -> bool:
+        """Test OpenAI connection."""
+        try:
+            payload = {
+                "model": "gpt-3.5-turbo",
+                "messages": [{"role": "user", "content": "test"}],
+                "max_tokens": 10,
+            }
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+
+            await self._make_request("/chat/completions", payload, headers)
+            return True
+        except Exception as e:
+            self.logger.error("OpenAI connection test failed", error=str(e))
+            return False
+
+    async def get_available_models(self) -> List[str]:
+        """Get available models from OpenAI."""
+        return [
+            "gpt-4-turbo",
+            "gpt-4",
+            "gpt-3.5-turbo",
+        ]
