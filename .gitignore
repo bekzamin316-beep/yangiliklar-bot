@@ -1,715 +1,91 @@
-SYSTEM ROLE
+```
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-You are a Senior Python Architect, Senior Telegram Bot Developer, Senior DevOps Engineer, Senior Database Architect and AI Integration Engineer.
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+.env/
 
-Your task is to build a COMPLETE PRODUCTION-READY Telegram Crypto News AI Bot.
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.tmp
 
-Do not generate demo code.
-Do not generate simplified code.
-Do not generate MVP code.
-
-Generate a real scalable production architecture.
-
-Everything must be modular and expandable.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-PROJECT GOAL
-
-Create a Telegram Crypto News AI Bot that:
-
-Collects crypto news automatically from multiple free sources.
-Filters duplicates.
-Uses AI to analyze news.
-Converts news into Uzbek language.
-Publishes formatted posts into Telegram channel.
-Stores all published posts.
-Creates Daily Digest automatically.
-Allows changing AI providers and models directly from Telegram Admin Panel.
-Allows editing prompts directly from Telegram Admin Panel.
-Requires ZERO code editing after deployment.
-
-Everything must be manageable from Telegram.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-TECH STACK
-
-Python 3.12+
-
-Aiogram 3.x
-
-PostgreSQL
-
-Redis
-
-SQLAlchemy
-
-Alembic
-
-APScheduler
-
-Docker
-
-Docker Compose
-
-Structlog
-
-Pydantic Settings
-
-aiohttp
-
-asyncio
-
-Repository Pattern
-
-Service Layer Pattern
-
-Dependency Injection
-
-Environment Configuration
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-PROJECT STRUCTURE
-
-app/
-
-core/
-
-database/
-
-models/
-
-repositories/
-
-services/
-
-telegram/
-
-handlers/
-
-middlewares/
-
-filters/
-
-keyboards/
-
-states/
-
-scheduler/
-
-rss/
-
-news/
-
-ai/
-
-providers/
-
-utils/
-
-logging/
-
-migrations/
-
-tests/
-
+# Logs
+*.log
 logs/
 
-Dockerfile
-
-docker-compose.yml
-
-requirements.txt
-
-README.md
-
-.env.example
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-TELEGRAM CHANNEL WORKFLOW
-
-News Source
-↓
-
-News Collector
-↓
-
-Duplicate Checker
-↓
-
-AI Analyzer
-↓
-
-AI Formatter
-↓
-
-Telegram Publisher
-↓
-
-Database Storage
-↓
-
-Daily Digest Generator
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-NEWS SOURCES
-
-RSS:
-
-CoinDesk
-
-CoinTelegraph
-
-Binance Announcements
-
-Bybit Blog
-
-OKX News
-
-KuCoin News
-
-API:
-
-CryptoPanic
-
-CoinGecko
-
-Future sources must be easy to add.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-DUPLICATE DETECTION
-
-Prevent reposting identical news.
-
-Detect duplicates by:
-
-Title Similarity
-
-Content Similarity
-
-Hash Comparison
-
-Semantic Similarity
-
-Store all hashes in database.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-AI PROVIDERS
-
-Support:
-
-OpenAI
-
-OpenRouter
-
-Groq
-
-Google Gemini
-
-Anthropic Claude
-
-Local Ollama
-
-Local OpenAI-Compatible APIs
-
-Provider must be switchable from Telegram Admin Panel.
-
-NO CODE CHANGES REQUIRED.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-MODEL MANAGEMENT
-
-Admin can:
-
-View current model
-
-Switch model
-
-Add custom model
-
-Remove model
-
-Test model
-
-Examples:
-
-qwen3
-
-deepseek
-
-gemini
-
-claude
-
-gpt
-
-kimi
-
-llama
-
-mistral
-
-Model names must be loaded dynamically.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-AI FALLBACK SYSTEM
-
-If current provider fails:
-
-Try backup provider.
-
-Priority:
-
-1 OpenRouter
-
-2 Groq
-
-3 Gemini
-
-4 Claude
-
-5 Local Ollama
-
-Never stop posting news.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-AI NEWS ANALYSIS
-
-AI receives original article.
-
-AI must:
-
-Summarize
-
-Translate to Uzbek
-
-Estimate market impact
-
-Determine sentiment
-
-Score importance
-
-Return structured JSON
-
-Example fields:
-
-title
-
-summary
-
-analysis
-
-sentiment
-
-importance_score
-
-tags
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-POST FORMAT
-
-🚨 KRIPTO YANGILIK
-
-📰 Yangilik:
-
-{summary}
-
-🤖 AI Tahlili:
-
-{analysis}
-
-📊 Kayfiyat:
-
-Bullish 🟢
-
-Bearish 🔴
-
-Neutral ⚪
-
-⭐ Muhimlik:
-
-{importance}/10
-
-🔗 Manba:
-
-{source_url}
-
-#Crypto #Bitcoin
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-IMPORTANCE FILTER
-
-AI scores news:
-
-0-100
-
-Rules:
-
-0-50 ignore
-
-51-100 publish
-
-Spam ignored
-
-Ads ignored
-
-Sponsored posts ignored
-
-Duplicate posts ignored
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-DATABASE TABLES
-
-users
-
-admins
-
-news
-
-news_sources
-
-rss_sources
-
-ai_providers
-
-ai_models
-
-ai_prompts
-
-daily_digests
-
-settings
-
-logs
-
-system_metrics
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-STORE FOR EACH POST
-
-title
-
-summary
-
-analysis
-
-source_name
-
-source_url
-
-telegram_message_id
-
-telegram_post_url
-
-importance_score
-
-sentiment
-
-published_at
-
-created_at
-
-hash
-
-digest_included
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-DAILY DIGEST
-
-Run every day.
-
-Default:
-
-23:59
-
-Admin can change time.
-
-Digest must contain:
-
-Top 5-15 important news.
-
-Each item:
-
-Headline
-
-Telegram post link
-
-Short summary
-
-Example:
-
-📊 Crypto Digest
-
-📅 2026-06-25
-
-1️⃣ Bitcoin ETF inflow increased
-
-🔗 https://t.me/channel/123
-
-2️⃣ Binance launched new feature
-
-🔗 https://t.me/channel/124
-
-...
-
-🎯 Kun xulosasi:
-
-{AI summary}
-
-📈 Eng Bullish:
-
-{event}
-
-📉 Eng Bearish:
-
-{event}
-
-#CryptoDigest
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-ADMIN PANEL
-
-Only ADMIN_ID access.
-
-Main Menu:
-
-📊 Statistics
-
-📰 News Sources
-
-🤖 AI Settings
-
-📝 Prompt Settings
-
-📅 Daily Digest
-
-⚙ System Settings
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-AI SETTINGS MENU
-
-Show:
-
-Current Provider
-
-Current Model
-
-Backup Providers
-
-Last Error
-
-Requests Today
-
-Estimated Token Usage
-
-Average Response Time
-
-Buttons:
-
-Switch Provider
-
-Switch Model
-
-Add Model
-
-Delete Model
-
-Test AI
-
-Set Fallback Order
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-PROMPT MANAGEMENT
-
-Editable inside Telegram.
-
-No code editing.
-
-Prompts:
-
-News Prompt
-
-Digest Prompt
-
-Alert Prompt
-
-Translation Prompt
-
-Summary Prompt
-
-Store in database.
-
-Version history required.
-
-Restore previous version required.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-NEWS SOURCE MANAGEMENT
-
-Admin can:
-
-Add RSS
-
-Delete RSS
-
-Enable RSS
-
-Disable RSS
-
-View RSS Status
-
-Test RSS
-
-Store sources in database.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-STATISTICS
-
-Daily Posts
-
-Weekly Posts
-
-Monthly Posts
-
-Published News
-
-Ignored News
-
-Duplicates
-
-Digest Count
-
-AI Requests
-
-Errors
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-SYSTEM MONITORING
-
-Database Status
-
-Redis Status
-
-RSS Status
-
-AI Status
-
-Telegram Status
-
-Server Uptime
-
-Memory Usage
-
-CPU Usage
-
-Disk Usage
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-SECURITY
-
-Admin-only commands
-
-Rate limiting
-
-Retry system
-
-Exception handling
-
-Encrypted API keys
-
-Input validation
-
-SQL Injection protection
-
-Logging
-
-Audit Logs
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-ENVIRONMENT VARIABLES
-
-All settings configurable.
-
-Nothing hardcoded.
-
-Generate complete .env.example
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-DOCKER
-
-Provide:
-
-Dockerfile
-
-docker-compose.yml
-
-Persistent volumes
-
-Auto restart
-
-Health checks
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-OUTPUT REQUIREMENTS
-
-Generate complete project.
-
-Generate all files.
-
-Generate all folders.
-
-Generate database models.
-
-Generate migrations.
-
-Generate repositories.
-
-Generate services.
-
-Generate Telegram handlers.
-
-Generate keyboards.
-
-Generate admin panel.
-
-Generate AI integrations.
-
-Generate RSS integrations.
-
-Generate scheduler jobs.
-
-Generate Docker configuration.
-
-Generate README.
-
-Generate .env.example.
-
-Project must run using:
-
-docker compose up -d
-
-without additional modifications.
+# Environment variables
+.env
+.env.local
+.env.*
+
+# Coverage reports
+.coverage
+htmlcov/
+.coverage.*
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Pytest
+.pytest_cache/
+
+# MyPy
+.mypy_cache/
+
+# Docker
+.dockerignore
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+```
