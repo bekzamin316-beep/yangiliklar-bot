@@ -1,6 +1,29 @@
 ```
-# Python
+# Dependencies
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.ENV
+.venv.bak/
+pip-log.txt
+pip-selfcheck.json
+*.egg-info/
+.eggs/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/
+
+# Python
 *.py[cod]
 *$py.class
 *.so
@@ -22,70 +45,18 @@ wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
-venv/
-ENV/
-env/
-.venv/
-.env/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*.tmp
-
-# Logs
-*.log
-logs/
-
-# Environment variables
+# Environment
 .env
 .env.local
 .env.*
 
-# Coverage reports
-.coverage
-htmlcov/
-.coverage.*
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
-
-# Pytest
-.pytest_cache/
-
-# MyPy
-.mypy_cache/
-
-# Docker
-.dockerignore
-
-# OS generated files
+# OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 ```

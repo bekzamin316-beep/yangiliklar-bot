@@ -15,6 +15,9 @@ from aiogram import Bot
 from app.ai.services.fallback_service import FallbackAIService
 from app.scheduler.jobs import NewsScheduler
 import redis.asyncio as redis
+from app.core.database.repositories.ai_repository import AIRepository
+from app.core.database.repositories.settings_repository import SettingsRepository
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Setup logging
 setup_logging()
@@ -38,7 +41,13 @@ async def main():
     dp.callback_query.middleware(db_middleware)
     
     # Initialize AI service with fallback
-    ai_service = FallbackAIService()
+    async with session_factory() as session:
+        ai_repository = AIRepository(session)
+        settings_repository = SettingsRepository(session)
+        ai_service = FallbackAIService(
+            ai_repository=ai_repository,
+            settings_repository=settings_repository,
+        )
     
     # Initialize scheduler
     scheduler = AsyncIOScheduler()
