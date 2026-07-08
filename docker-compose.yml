@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  bot:
+    build: .
+    container_name: cnbot
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./logs:/app/logs
+
+  db:
+    image: postgres:16-alpine
+    container_name: cnbot-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cnbot
+      POSTGRES_PASSWORD: cnbot_pass
+      POSTGRES_DB: cnbot_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  redis:
+    image: redis:7-alpine
+    container_name: cnbot-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:

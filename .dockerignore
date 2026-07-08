@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+cnbot.db
+*.db
+.env
+.git/
+deploy/
+tests/
+*.md
+.aider*

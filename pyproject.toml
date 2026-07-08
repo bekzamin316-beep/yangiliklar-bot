@@ -1,0 +1,43 @@
+[project]
+name = "crypto-news-bot"
+version = "1.0.0"
+description = "Production-ready Telegram Crypto News AI Bot with 5-module architecture"
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram>=3.7.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "psycopg2-binary>=2.9.0",
+    "alembic>=1.13.0",
+    "redis>=5.0.0",
+    "aioredis>=2.0.0",
+    "apscheduler>=3.10.0",
+    "feedparser>=6.0.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.3.0",
+    "python-dateutil>=2.8.0",
+    "aiofiles>=23.2.0",
+    "structlog>=24.1.0",
+    "tenacity>=8.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.4.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
