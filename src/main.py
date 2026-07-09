@@ -26,6 +26,10 @@ async def on_startup(bot, publisher: Publisher) -> None:
     collector = NewsCollector()
     await collector.ensure_sources_seeded()
 
+    # Load dedup cache from DB
+    from src.scheduler.jobs import init_dedup_cache
+    await init_dedup_cache()
+
     # Load custom AI prompt from DB (if admin set one)
     from src.core.database import get_session
     from src.core.repositories import SettingsRepository

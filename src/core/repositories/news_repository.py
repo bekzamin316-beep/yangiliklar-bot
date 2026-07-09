@@ -23,6 +23,13 @@ class NewsRepository(BaseRepository[News]):
         )
         return result.scalar_one_or_none()
 
+    async def get_all_hashes_and_urls(self) -> list[tuple[str | None, str | None]]:
+        """Get all content_hashes and source_urls for dedup cache preload."""
+        result = await self.session.execute(
+            select(News.content_hash, News.source_url)
+        )
+        return result.all()
+
     async def get_unpublished(self, limit: int = 20) -> Sequence[News]:
         """Get unpublished news items, ordered by importance (descending)."""
         result = await self.session.execute(

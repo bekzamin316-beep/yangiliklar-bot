@@ -92,38 +92,36 @@ class CryptoPriceService:
 
     @staticmethod
     def format_change(change: float) -> str:
-        """Format 24h change with arrow."""
+        """Format 24h change with colored indicator."""
         if change > 0:
-            return f"⬆️ +{change:.2f}%"
+            return f"🟩 +{change:.2f}%"
         elif change < 0:
-            return f"⬇️ {change:.2f}%"
+            return f"🟥 {change:.2f}%"
         else:
-            return "➡️ 0.00%"
+            return "⬜ 0.00%"
 
     @staticmethod
     def get_display_name(coin_id: str) -> str:
-        """Get display name for coin ID."""
+        """Get short display name for coin ID."""
         names = {
-            "bitcoin": "Bitcoin",
-            "ethereum": "Ethereum",
-            "solana": "Solana",
+            "bitcoin": "Btc",
+            "ethereum": "Eth",
+            "solana": "Sol",
             "binancecoin": "BNB",
             "ripple": "XRP",
-            "cardano": "Cardano",
-            "avalanche-2": "Avalanche",
-            "polygon": "Polygon",
-            "dogecoin": "Dogecoin",
-            "tron": "TRON",
-            "near": "NEAR",
-            "chainlink": "Chainlink",
-            "polkadot": "Polkadot",
-            "aptos": "Aptos",
-            "Celestia": "Celestia",
-            " Ton": "Ton",
-            "litecoin": "Litecoin",
-            "off-chain": "Off-chain",
+            "cardano": "Ada",
+            "avalanche-2": "Avax",
+            "polygon": "Matic",
+            "dogecoin": "Doge",
+            "tron": "Trx",
+            "near": "Near",
+            "chainlink": "Link",
+            "polkadot": "Dot",
+            "aptos": "Apt",
+            "Celestia": "Tia",
+            "litecoin": "Ltc",
             "pepe": "Pepe",
-            "shiba-inu": "Shiba Inu",
+            "shiba-inu": "Shib",
         }
         return names.get(coin_id, coin_id.title())
 

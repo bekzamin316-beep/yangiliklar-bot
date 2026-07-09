@@ -4,8 +4,6 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from aiogram.enums import ParseMode
-
 from src.core.config import settings
 from src.core.database import get_session
 from src.core.repositories import SettingsRepository
@@ -29,14 +27,17 @@ class LivePriceService:
         async with get_session() as session:
             repo = SettingsRepository(session)
             mid = await repo.get_value("live_price_message_id")
-            if mid:
+            if mid and mid.isdigit():
                 self.message_id = int(mid)
+            else:
+                self.message_id = None
 
     async def _save_message_id(self) -> None:
         """Persist current message_id to DB."""
         async with get_session() as session:
             repo = SettingsRepository(session)
-            await repo.set_value("live_price_message_id", str(self.message_id))
+            value = str(self.message_id) if self.message_id is not None else ""
+            await repo.set_value("live_price_message_id", value)
 
     async def get_configured_coins(self) -> list[str]:
         """Get list of coins from settings, default to BTC, ETH, SOL."""
@@ -72,67 +73,63 @@ class LivePriceService:
                     name = self.service.get_display_name(coin_id)
                     price = self.service.format_price(data["price"], coin_id)
                     change = self.service.format_change(data["change_24h"])
-                    lines.append(f"<b>{name}</b>")
-                    lines.append(f"└ {price}  {change}")
+                    lines.append(f"{name}{price}  {change}")
                 else:
-                    lines.append(f"<b>{coin_id}</b>")
-                    lines.append("└ ---  ---")
+                    lines.append(f"{coin_id}  ---  ---")
 
             lines.append("")
-            lines.append(f"🕐 <i>Yangilangan: {now.strftime('%H:%M:%S')} (Toshkent vaqti)</i>")
+            lines.append(f"🕐 Yangilangan: {now.strftime('%H:%M:%S')} (Toshkent vaqti)")
 
             return "\n".join(lines)
 
         except Exception as e:
             logger.error("Failed to format price message: %s", e)
-            return "❌ <b>Narxlarni olishda xatolik</b>"
+            return "❌ Narxlarni olishda xatolik"
 
     async def create_or_update_pinned_message(self) -> int:
         """Create or update the pinned price message in channel.
 
+        If the pinned message was deleted, creates a new one immediately.
         Returns the message_id.
         """
         await self._load_message_id()
 
-        try:
-            coins = await self.get_configured_coins()
-            text = await self.format_price_message(coins)
+        coins = await self.get_configured_coins()
+        text = await self.format_price_message(coins)
 
-            if self.message_id:
-                # Edit existing message
+        if self.message_id:
+            try:
                 await self.bot.edit_message_text(
                     chat_id=self.channel_id,
                     message_id=self.message_id,
                     text=text,
-                    parse_mode=ParseMode.HTML,
                     disable_web_page_preview=True,
                 )
                 logger.info("Updated live price message (msg_id=%d)", self.message_id)
-            else:
-                # Create new message
-                msg = await self.bot.send_message(
-                    chat_id=self.channel_id,
-                    text=text,
-                    parse_mode=ParseMode.HTML,
-                    disable_web_page_preview=True,
+                return self.message_id
+            except Exception as e:
+                logger.warning(
+                    "Failed to edit live price message (msg_id=%d): %s — re-creating",
+                    self.message_id, e,
                 )
-                self.message_id = msg.message_id
+                self.message_id = None
                 await self._save_message_id()
-                logger.info("Created live price message (msg_id=%d)", self.message_id)
 
-                # Pin the message
-                await self.bot.pin_chat_message(
-                    chat_id=self.channel_id,
-                    message_id=self.message_id,
-                    disable_notification=True,
-                )
-                logger.info("Pinned live price message")
+        msg = await self.bot.send_message(
+            chat_id=self.channel_id,
+            text=text,
+            disable_web_page_preview=True,
+        )
+        self.message_id = msg.message_id
+        await self._save_message_id()
+        logger.info("Created live price message (msg_id=%d)", self.message_id)
 
-        except Exception as e:
-            logger.error("Failed to update pinned message: %s", e)
-            self.message_id = None
-            await self._save_message_id()
-            raise
+        await self.bot.pin_chat_message(
+            chat_id=self.channel_id,
+            message_id=self.message_id,
+            disable_notification=True,
+        )
+        logger.info("Pinned live price message")
 
         return self.message_id
 

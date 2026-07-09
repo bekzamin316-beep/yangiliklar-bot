@@ -8,11 +8,19 @@ from src.core.database import get_session
 from src.core.repositories import NewsRepository, DigestRepository
 from src.ai_service.service import AIService
 from src.news_collector.collector import NewsCollector
+from src.news_collector.dedup_cache import DedupCache
 from src.news_collector.processor import NewsProcessor
 from src.telegram_bot.publisher import Publisher
 from src.crypto_prices.live import LivePriceService
 
 logger = logging.getLogger(__name__)
+
+_dedup_cache = DedupCache()
+
+
+async def init_dedup_cache() -> None:
+    """Load dedup cache from DB on startup."""
+    await _dedup_cache.load_from_db()
 
 
 async def collect_and_publish_news(publisher: Publisher) -> None:
@@ -40,9 +48,11 @@ async def collect_and_publish_news(publisher: Publisher) -> None:
 
         for item in raw_items:
             try:
-                # Check duplicate
-                existing = await processor._get_by_hash(item.content_hash())
-                if existing:
+                # Check duplicate via cache
+                is_dup = await _dedup_cache.check_or_add(
+                    item.content_hash(), item.url_hash()
+                )
+                if is_dup:
                     logger.debug("Skipping duplicate: %s", item.title[:50])
                     continue
 
@@ -59,6 +69,7 @@ async def collect_and_publish_news(publisher: Publisher) -> None:
 
                 # Save to DB
                 news = await processor._save_news(item, analysis)
+                _dedup_cache.add(item.content_hash(), item.url_hash())
                 logger.info(
                     "Processed: %s | score=%d | %s",
                     item.title[:50], analysis.importance_score, analysis.sentiment,

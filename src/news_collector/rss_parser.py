@@ -113,6 +113,7 @@ class RSSParser:
 
         all_items: list[RawNewsItem] = []
         seen_hashes = set()
+        seen_urls = set()
 
         for result in results:
             if isinstance(result, Exception):
@@ -120,8 +121,10 @@ class RSSParser:
                 continue
             for item in result:
                 h = item.content_hash()
-                if h not in seen_hashes:
+                uh = item.url_hash()
+                if h not in seen_hashes and uh not in seen_urls:
                     seen_hashes.add(h)
+                    seen_urls.add(uh)
                     all_items.append(item)
 
         logger.info("Collected %d unique items from %d feeds", len(all_items), len(feeds))

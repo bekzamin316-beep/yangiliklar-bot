@@ -24,13 +24,16 @@ class NewsCollector:
         """Collect news from all sources and return deduplicated items."""
         all_items: list[RawNewsItem] = []
         seen_hashes = set()
+        seen_urls = set()
 
         # 1. RSS feeds
         rss_items = await self._collect_rss()
         for item in rss_items:
             h = item.content_hash()
-            if h not in seen_hashes:
+            uh = item.url_hash()
+            if h not in seen_hashes and uh not in seen_urls:
                 seen_hashes.add(h)
+                seen_urls.add(uh)
                 all_items.append(item)
 
         # 2. CryptoPanic API (if configured)
@@ -38,8 +41,10 @@ class NewsCollector:
             cp_items = await self.cryptopanic.fetch_news(settings.max_news_per_run)
             for item in cp_items:
                 h = item.content_hash()
-                if h not in seen_hashes:
+                uh = item.url_hash()
+                if h not in seen_hashes and uh not in seen_urls:
                     seen_hashes.add(h)
+                    seen_urls.add(uh)
                     all_items.append(item)
 
         logger.info("Total collected: %d unique news items", len(all_items))
