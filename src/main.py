@@ -26,6 +26,17 @@ async def on_startup(bot, publisher: Publisher) -> None:
     collector = NewsCollector()
     await collector.ensure_sources_seeded()
 
+    # Load custom AI prompt from DB (if admin set one)
+    from src.core.database import get_session
+    from src.core.repositories import SettingsRepository
+    from src.ai_service.summarizer import set_analysis_prompt
+    async with get_session() as session:
+        settings_repo = SettingsRepository(session)
+        custom_prompt = await settings_repo.get_value("ai_analysis_prompt")
+        if custom_prompt:
+            set_analysis_prompt(custom_prompt)
+            logger.info("Loaded custom AI prompt from DB")
+
     # Notify admins
     me = await bot.get_me()
     await publisher.send_admin_notification(

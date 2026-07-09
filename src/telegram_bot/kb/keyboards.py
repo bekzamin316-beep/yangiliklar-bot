@@ -27,9 +27,10 @@ def get_admin_main_keyboard() -> InlineKeyboardBuilder:
     kb.button(text="🔗 RSS Manbalar", callback_data="admin_sources")
     kb.button(text="🤖 AI Sozlamalar", callback_data="admin_ai")
     kb.button(text="📅 Digest", callback_data="admin_digest")
+    kb.button(text="💰 Live Narxlar", callback_data="admin_live_prices")
     kb.button(text="📋 Loglar", callback_data="admin_logs")
     kb.button(text="⚙️ Tizim", callback_data="admin_system")
-    kb.adjust(2, 2, 2, 2)
+    kb.adjust(2, 2, 2, 2, 1)
     return kb
 
 
@@ -74,9 +75,10 @@ def get_admin_ai_keyboard() -> InlineKeyboardBuilder:
     kb.button(text="🔧 Provayder", callback_data="admin_ai_provider")
     kb.button(text="🧠 Model", callback_data="admin_ai_model")
     kb.button(text="📝 Promptlar", callback_data="admin_ai_prompts")
+    kb.button(text="✏️ Prompt o'zgartirish", callback_data="admin_ai_prompt_edit")
     kb.button(text="🧪 Test", callback_data="admin_ai_test")
     kb.button(text="🔙 Orqaga", callback_data="admin_main")
-    kb.adjust(2, 2)
+    kb.adjust(2, 2, 2)
     return kb
 
 
@@ -88,6 +90,18 @@ def get_admin_digest_keyboard() -> InlineKeyboardBuilder:
     kb.button(text="📋 Oxirgi digestlar", callback_data="digest_history")
     kb.button(text="🔙 Orqaga", callback_data="admin_main")
     kb.adjust(1, 1, 1)
+    return kb
+
+
+def get_admin_live_prices_keyboard() -> InlineKeyboardBuilder:
+    """Admin live prices settings submenu."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="💊 Tangalarni o'zgartirish", callback_data="live_coins_edit")
+    kb.button(text="⏱ Intervalni o'zgartirish", callback_data="live_interval_edit")
+    kb.button(text="🔄 Hozir yangilash", callback_data="live_refresh_now")
+    kb.button(text="📊 Joriy holat", callback_data="live_status")
+    kb.button(text="🔙 Orqaga", callback_data="admin_main")
+    kb.adjust(1, 1, 1, 1)
     return kb
 
 
@@ -115,4 +129,21 @@ def get_cancel_keyboard() -> InlineKeyboardBuilder:
     """Cancel button for FSM flows."""
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Bekor qilish", callback_data="cancel_action")
+    return kb
+
+
+def get_pin_keyboard(entered: str = "") -> InlineKeyboardBuilder:
+    """PIN pad keyboard for 5-digit password entry.
+
+    Shows digits 0-9 in a phone-layout grid, plus confirm and clear buttons.
+    `entered` tracks how many digits have been input (shown as ● dots).
+    """
+    kb = InlineKeyboardBuilder()
+    # Phone-style layout: 1-9 in 3x3 grid, then 0 on center bottom
+    for digit in [1, 2, 3, 4, 5, 6, 7, 8, 9]:
+        kb.button(text=str(digit), callback_data=f"digit_{digit}")
+    kb.button(text="🗑 Tozalash", callback_data="pin_clear")
+    kb.button(text="0", callback_data="digit_0")
+    kb.button(text="✅ Tasdiqlash", callback_data="pin_confirm")
+    kb.adjust(3, 3, 3, 3)  # rows: [1,2,3] [4,5,6] [7,8,9] [clear,0,confirm]
     return kb

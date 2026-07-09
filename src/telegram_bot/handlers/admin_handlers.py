@@ -15,6 +15,7 @@ from src.core.repositories import (
     DigestRepository,
     LogRepository,
 )
+from src.crypto_prices.live import LivePriceService
 from src.telegram_bot.filters.admin_filter import AdminFilter
 from src.telegram_bot.kb.keyboards import (
     get_admin_main_keyboard,
@@ -24,10 +25,12 @@ from src.telegram_bot.kb.keyboards import (
     get_admin_ai_keyboard,
     get_admin_digest_keyboard,
     get_admin_system_keyboard,
+    get_admin_live_prices_keyboard,
     get_back_keyboard,
     get_cancel_keyboard,
+    get_pin_keyboard,
 )
-from src.telegram_bot.states import AdminStates
+from src.telegram_bot.states import AdminStates, LivePriceStates
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +38,56 @@ admin_router = Router()
 admin_router.message.filter(AdminFilter())
 admin_router.callback_query.filter(AdminFilter())
 
+# In-memory set of authenticated admin user IDs (reset on bot restart)
+_authenticated_admins: set[int] = set()
+
+
+def _is_authenticated(user_id: int) -> bool:
+    """Check if admin has entered the password this session."""
+    if not settings.admin_password:
+        return True  # No password configured = open access
+    return user_id in _authenticated_admins
+
+
+async def _require_auth(event: types.Message | types.CallbackQuery, state: FSMContext) -> bool:
+    """Gate: if admin is not authenticated, show PIN pad for password.
+
+    Returns True if authenticated (proceed), False if redirected to PIN input.
+    """
+    user_id = event.from_user.id
+    if _is_authenticated(user_id):
+        return True
+
+    await state.clear()
+    await state.set_state(AdminStates.waiting_for_admin_password)
+    await state.update_data(pin_digits="")
+
+    text = "🔒 <b>Admin Panel — Parol talab qilinadi</b>\n\n5 xonali PIN kodni kiriting:\n⬜ ⬜ ⬜ ⬜ ⬜"
+    markup = get_pin_keyboard().as_markup()
+
+    if isinstance(event, types.CallbackQuery):
+        await event.message.edit_text(text, reply_markup=markup)
+        await event.answer()
+    else:
+        await event.answer(text, reply_markup=markup)
+    return False
+
 
 # ─── Entry points ──────────────────────────────────────────────
 
 @admin_router.message(CommandStart())
-async def admin_start(message: types.Message) -> None:
-    """Admin /start — show admin panel."""
+async def admin_start(message: types.Message, state: FSMContext) -> None:
+    """Admin /start — show admin panel (after auth check)."""
+    if not await _require_auth(message, state):
+        return
     await _show_admin_main(message)
 
 
 @admin_router.message(Command("admin"))
-async def admin_panel(message: types.Message) -> None:
-    """Admin /admin — show admin panel."""
+async def admin_panel(message: types.Message, state: FSMContext) -> None:
+    """Admin /admin — show admin panel (after auth check)."""
+    if not await _require_auth(message, state):
+        return
     await _show_admin_main(message)
 
 
@@ -58,10 +99,68 @@ async def _show_admin_main(message: types.Message) -> None:
 # ─── Main menu callbacks ───────────────────────────────────────
 
 @admin_router.callback_query(F.data == "admin_main")
-async def cb_admin_main(callback: types.CallbackQuery) -> None:
+async def cb_admin_main(callback: types.CallbackQuery, state: FSMContext) -> None:
+    if not await _require_auth(callback, state):
+        return
     text = "⚙️ <b>Admin Panel</b>\n\nBoshqaruv bo'limini tanlang:"
     await callback.message.edit_text(text, reply_markup=get_admin_main_keyboard().as_markup())
     await callback.answer()
+
+
+# ─── PIN pad handlers ──────────────────────────────────────────
+
+@admin_router.callback_query(F.data.regexp(r"^digit_\d$"), AdminStates.waiting_for_admin_password)
+async def cb_pin_digit(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Handle PIN digit button press (digit_0 … digit_9)."""
+    digit = callback.data.split("_")[1]
+    data = await state.get_data()
+    current = data.get("pin_digits", "")
+
+    if len(current) >= 5:
+        await callback.answer("⚠️ Faqat 5 xona!", show_alert=True)
+        return
+
+    current += digit
+    await state.update_data(pin_digits=current)
+
+    dots = " ".join("●" if i < len(current) else "⬜" for i in range(5))
+    text = f"🔒 <b>Admin Panel — Parol talab qilinadi</b>\n\n5 xonali PIN kodni kiriting:\n{dots}"
+    await callback.message.edit_text(text, reply_markup=get_pin_keyboard(current).as_markup())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "pin_clear", AdminStates.waiting_for_admin_password)
+async def cb_pin_clear(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Clear all entered PIN digits."""
+    await state.update_data(pin_digits="")
+    text = "🔒 <b>Admin Panel — Parol talab qilinadi</b>\n\n5 xonali PIN kodni kiriting:\n⬜ ⬜ ⬜ ⬜ ⬜"
+    await callback.message.edit_text(text, reply_markup=get_pin_keyboard().as_markup())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "pin_confirm", AdminStates.waiting_for_admin_password)
+async def cb_pin_confirm(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Confirm PIN — check against configured 5-digit admin password."""
+    data = await state.get_data()
+    entered = data.get("pin_digits", "")
+
+    if len(entered) != 5:
+        await callback.answer("⚠️ 5 xonali PIN kiriting!", show_alert=True)
+        return
+
+    if entered == settings.admin_password:
+        _authenticated_admins.add(callback.from_user.id)
+        await state.clear()
+        await callback.message.edit_text("✅ Parol to'g'ri! Admin panel ochildi.")
+        text = "⚙️ <b>Admin Panel</b>\n\nBoshqaruv bo'limini tanlang:"
+        await callback.message.answer(text, reply_markup=get_admin_main_keyboard().as_markup())
+        await callback.answer()
+    else:
+        await state.update_data(pin_digits="")
+        dots = "⬜ ⬜ ⬜ ⬜ ⬜"
+        text = f"❌ <b>Parol noto'g'ri!</b>\n\nQayta kiriting:\n{dots}"
+        await callback.message.edit_text(text, reply_markup=get_pin_keyboard().as_markup())
+        await callback.answer("❌ Noto'g'ri parol!", show_alert=True)
 
 
 # ─── Statistics ────────────────────────────────────────────────
@@ -126,6 +225,37 @@ async def cb_admin_publish_now(callback: types.CallbackQuery, session) -> None:
         count += 1
 
     await callback.answer(f"✅ {count} ta yangilik e'lon qilindi", show_alert=True)
+
+
+@admin_router.callback_query(F.data == "admin_delete_news")
+async def cb_admin_delete_news(callback: types.CallbackQuery, session) -> None:
+    """Show latest unpublished news for deletion."""
+    news_repo = NewsRepository(session)
+    pending = await news_repo.get_unpublished(limit=10)
+
+    if not pending:
+        text = "📭 O'chirish uchun yangilik yo'q."
+    else:
+        lines = ["🗑 <b>O'chirish uchun yangiliklar:</b>\n"]
+        for n in pending:
+            lines.append(f"📋 ID:{n.id} — {n.title[:60]}")
+        lines.append("\n💬 O'chirish uchun yangilik ID raqamini yuboring (masalan: <code>delete 5</code>)")
+
+    await callback.message.edit_text(text, reply_markup=get_back_keyboard("admin_news").as_markup())
+    await callback.answer()
+
+
+@admin_router.message(F.text.regexp(r"^delete\s+(\d+)$"))
+async def msg_delete_news_by_id(message: types.Message, session) -> None:
+    """Delete a news item by ID (admin command: delete <id>)."""
+    news_id = int(message.text.split()[1])
+    news_repo = NewsRepository(session)
+    deleted = await news_repo.delete(news_id)
+
+    if deleted:
+        await message.answer(f"✅ Yangilik (ID:{news_id}) o'chirildi!")
+    else:
+        await message.answer(f"❌ Yangilik (ID:{news_id}) topilmadi.")
 
 
 # ─── RSS Sources ───────────────────────────────────────────────
@@ -262,6 +392,126 @@ async def cb_admin_ai(callback: types.CallbackQuery) -> None:
     await callback.answer()
 
 
+@admin_router.callback_query(F.data == "admin_ai_provider")
+async def cb_admin_ai_provider(callback: types.CallbackQuery) -> None:
+    """Show current AI provider info."""
+    text = (
+        f"🔧 <b>AI Provayder</b>\n\n"
+        f"📡 Joriy: <b>{settings.ai_provider}</b>\n"
+        f"🔗 API Base: <code>{settings.dashscope_api_base if settings.ai_provider == 'dashscope' else settings.openrouter_api_base}</code>\n"
+        f"🔑 API Key: <code>{'✅ Mavjud' if (settings.dashscope_api_key if settings.ai_provider == 'dashscope' else settings.openrouter_api_key) else '❌ Yo\'q'}</code>\n\n"
+        f"ℹ️ Provayder .env faylidan o'zgartiriladi:\n"
+        f"<code>AI_PROVIDER=dashscope</code> yoki <code>AI_PROVIDER=openrouter</code>"
+    )
+    await callback.message.edit_text(text, reply_markup=get_back_keyboard("admin_ai").as_markup())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_ai_model")
+async def cb_admin_ai_model(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Show current model and prompt to change."""
+    text = (
+        f"🧠 <b>AI Model</b>\n\n"
+        f"Joriy: <b>{settings.ai_model}</b>\n\n"
+        f"Yangi model nomini yuboring:\n"
+        f"DashScope: <code>qwen3.5-122b-a10b</code>, <code>qwen-plus</code>, <code>qwen-turbo</code>\n"
+        f"OpenRouter: <code>free</code> (bepul modellar)"
+    )
+    await callback.message.edit_text(text, reply_markup=get_cancel_keyboard().as_markup())
+    await state.set_state(AdminStates.waiting_for_ai_model)
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_ai_model)
+async def process_ai_model(message: types.Message, state: FSMContext) -> None:
+    """Save new AI model to .env."""
+    new_model = message.text.strip()
+    import pathlib
+    env_path = pathlib.Path(__file__).parent.parent.parent.parent / ".env"
+    lines = env_path.read_text().splitlines()
+    updated = False
+    for i, line in enumerate(lines):
+        if line.startswith("AI_MODEL="):
+            lines[i] = f"AI_MODEL={new_model}"
+            updated = True
+            break
+    if not updated:
+        lines.append(f"AI_MODEL={new_model}")
+    env_path.write_text("\n".join(lines) + "\n")
+    await message.answer(f"✅ AI Model o'zgartirildi: <b>{new_model}</b>\n\n⚠️ Botni qayta ishga tushirish kerak!")
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "admin_ai_prompts")
+async def cb_admin_ai_prompts(callback: types.CallbackQuery, session) -> None:
+    """Show AI prompt information."""
+    settings_repo = SettingsRepository(session)
+    custom_prompt = await settings_repo.get_value("ai_analysis_prompt")
+    from src.ai_service.summarizer import get_analysis_prompt
+    current_prompt = get_analysis_prompt()
+
+    text = (
+        "📝 <b>AI Promptlar</b>\n\n"
+        f"📊 Tahlil prompti: {'✅ Maxsus' if custom_prompt else '⚡ Standart'}\n"
+        f"🌍 Tarjima: {'✅ Yoqilgan' if settings.enable_translation else '❌ O\'chirilgan'} ({settings.target_language})\n\n"
+        "💬 Joriy prompt:\n<code>" + current_prompt[:300] + "</code>"
+    )
+    if custom_prompt:
+        text += f"\n\n✅ Maxsus prompt DBda saqlangan"
+
+    await callback.message.edit_text(text, reply_markup=get_back_keyboard("admin_ai").as_markup())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "admin_ai_prompt_edit")
+async def cb_admin_ai_prompt_edit(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Prompt admin to enter a new AI analysis prompt."""
+    from src.ai_service.summarizer import get_analysis_prompt
+    current = get_analysis_prompt()
+
+    text = (
+        "✏️ <b>AI Prompt o'zgartirish</b>\n\n"
+        "Yangi prompt matnini yuboring.\n\n"
+        "⚠️ Promptda {title} va {content} o'rinlarini saqlang — ular yangilik sarlavha va tarkib bilan almashtiriladi.\n\n"
+        "⚡ Joriy prompt:\n<code>" + current[:500] + "</code>"
+    )
+    await callback.message.edit_text(text, reply_markup=get_cancel_keyboard().as_markup())
+    await state.set_state(AdminStates.waiting_for_prompt_edit)
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_prompt_edit)
+async def process_prompt_edit(message: types.Message, state: FSMContext, session) -> None:
+    """Save custom AI prompt to DB and update runtime."""
+    new_prompt = message.text.strip()
+
+    if "{title}" not in new_prompt or "{content}" not in new_prompt:
+        await message.answer(
+            "❌ Promptda <code>{title}</code> va <code>{content}</code> o'rinlarini bo'lishi shart!\n\n"
+            "Qayta yuboring yoki ❌ Bekor qilish tugmasini bosing."
+        )
+        return
+
+    # Save to DB
+    settings_repo = SettingsRepository(session)
+    await settings_repo.set_value(
+        "ai_analysis_prompt", new_prompt,
+        value_type="string",
+        description="Custom AI analysis prompt (overrides default)",
+    )
+
+    # Update runtime variable
+    from src.ai_service.summarizer import set_analysis_prompt
+    set_analysis_prompt(new_prompt)
+
+    await message.answer(
+        "✅ <b>AI Prompt o'zgartirildi!</b>\n\n"
+        "💡 Yangi prompt darhol ishga tushadi — botni restart qilish shart emas.\n\n"
+        "💬 Yangi prompt:\n<code>" + new_prompt[:300] + "</code>"
+    )
+    await state.clear()
+
+
 @admin_router.callback_query(F.data == "admin_ai_test")
 async def cb_admin_ai_test(callback: types.CallbackQuery) -> None:
     """Test AI provider with a simple prompt."""
@@ -299,6 +549,66 @@ async def cb_admin_digest(callback: types.CallbackQuery) -> None:
     )
     await callback.message.edit_text(text, reply_markup=get_admin_digest_keyboard().as_markup())
     await callback.answer()
+
+
+@admin_router.callback_query(F.data == "digest_change_time")
+async def cb_digest_change_time(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Prompt admin to enter new digest time."""
+    text = (
+        "🕐 <b>Digest vaqtni o'zgartirish</b>\n\n"
+        f"Joriy: <b>{settings.digest_hour:02d}:{settings.digest_minute:02d}</b>\n\n"
+        "Yangi vaqtni HH:MM formatda yuboring (masalan: <code>20:30</code>)"
+    )
+    await callback.message.edit_text(text, reply_markup=get_cancel_keyboard().as_markup())
+    await state.set_state(AdminStates.waiting_for_digest_time)
+    await callback.answer()
+
+
+@admin_router.message(AdminStates.waiting_for_digest_time)
+async def process_digest_time(message: types.Message, state: FSMContext) -> None:
+    """Save new digest time to .env."""
+    import pathlib
+    text = message.text.strip()
+    try:
+        parts = text.split(":")
+        hour = int(parts[0])
+        minute = int(parts[1])
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError
+    except (ValueError, IndexError):
+        await message.answer("❌ Noto'g'ri format. HH:MM formatda yuboring (masalan: 20:30)")
+        return
+
+    env_path = pathlib.Path(__file__).parent.parent.parent.parent / ".env"
+    lines = env_path.read_text().splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("DIGEST_HOUR="):
+            lines[i] = f"DIGEST_HOUR={hour}"
+        elif line.startswith("DIGEST_MINUTE="):
+            lines[i] = f"DIGEST_MINUTE={minute}"
+    env_path.write_text("\n".join(lines) + "\n")
+
+    await message.answer(
+        f"✅ Digest vaqt o'zgartirildi: <b>{hour:02d}:{minute:02d}</b>\n\n⚠️ Botni qayta ishga tushirish kerak!"
+    )
+    await state.clear()
+
+
+@admin_router.callback_query(F.data == "digest_send_now")
+async def cb_digest_send_now(callback: types.CallbackQuery) -> None:
+    """Trigger digest generation immediately."""
+    await callback.answer("📅 Digest generatsiya boshlandi...", show_alert=True)
+
+    try:
+        from src.telegram_bot.publisher import Publisher
+        from src.scheduler.jobs import generate_daily_digest
+        bot = callback.bot
+        publisher = Publisher(bot)
+        await generate_daily_digest(publisher)
+        await callback.message.answer("✅ <b>Digest yuborildi!</b>")
+    except Exception as e:
+        await callback.message.answer(f"❌ <b>Digest xato:</b> {e}")
+        logger.error("Manual digest failed: %s", e)
 
 
 @admin_router.callback_query(F.data == "digest_history")
@@ -343,6 +653,57 @@ async def cb_sys_db(callback: types.CallbackQuery, session) -> None:
         f"🔗 RSS manbalar: {rss_count}\n"
         f"📡 DB turi: {settings.db_type}"
     )
+    await callback.message.edit_text(text, reply_markup=get_back_keyboard("admin_system").as_markup())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "sys_redis")
+async def cb_sys_redis(callback: types.CallbackQuery) -> None:
+    """Show Redis connection status."""
+    try:
+        import redis.asyncio as aioredis
+        r = aioredis.from_url(settings.redis_url)
+        info = await r.info("server")
+        ping = await r.ping()
+        mem = await r.info("memory")
+        await r.aclose()
+
+        text = (
+            f"📡 <b>Redis</b>\n\n"
+            f"✅ Status: Connected\n"
+            f"📋 Version: {info.get('redis_version', 'N/A')}\n"
+            f"💾 Memory: {mem.get('used_memory_human', 'N/A')}\n"
+            f"🔗 URL: <code>{settings.redis_url}</code>"
+        )
+    except Exception as e:
+        text = (
+            f"📡 <b>Redis</b>\n\n"
+            f"❌ Status: Ulanish xatosi\n"
+            f"⚠️ Xato: <code>{str(e)[:100]}</code>\n"
+            f"🔗 URL: <code>{settings.redis_url}</code>\n\n"
+            f"ℹ️ Redis mavjud bo'lmasa bot ishlayveradi, lekin Redis storage ishlamaydi."
+        )
+
+    await callback.message.edit_text(text, reply_markup=get_back_keyboard("admin_system").as_markup())
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "sys_metrics")
+async def cb_sys_metrics(callback: types.CallbackQuery, session) -> None:
+    """Show system metrics."""
+    import psutil
+    cpu = psutil.cpu_percent(interval=1)
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage("/")
+
+    text = (
+        f"📊 <b>System Metrics</b>\n\n"
+        f"💻 CPU: <b>{cpu}%</b>\n"
+        f"💾 RAM: <b>{mem.percent}%</b> ({mem.available // 1024 // 1024} MB free)\n"
+        f"📁 Disk: <b>{disk.percent}%</b> ({(disk.free // 1024 // 1024)} MB free)\n"
+        f"⏱ Uptime: <b>{int(psutil.boot_time())}</b>"
+    )
+
     await callback.message.edit_text(text, reply_markup=get_back_keyboard("admin_system").as_markup())
     await callback.answer()
 
@@ -533,3 +894,139 @@ async def cb_cancel(callback: types.CallbackQuery, state: FSMContext) -> None:
         reply_markup=get_admin_main_keyboard().as_markup(),
     )
     await callback.answer("❌ Bekor qilindi")
+
+
+# ─── Live Prices ───────────────────────────────────────────────
+
+@admin_router.callback_query(F.data == "admin_live_prices")
+async def cb_admin_live_prices(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Show live prices settings menu."""
+    if not await _require_auth(callback, state):
+        return
+    text = "💰 <b>Live Narxlar Sozlamalari</b>\n\n"
+    text += "Bu bo'limda kanalga qadalgan live crypto narxlarni boshqarasiz.\n\n"
+    text += "Tangalar va yangilash intervalini o'zgartirishingiz mumkin."
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_admin_live_prices_keyboard().as_markup(),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "live_status")
+async def cb_live_status(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Show current live prices status."""
+    async with get_session() as session:
+        repo = SettingsRepository(session)
+        coins_str = await repo.get_value("live_price_coins")
+        interval = await repo.get_int("live_price_interval", 60)
+
+    coins = coins_str.split(",") if coins_str else ["bitcoin", "ethereum", "solana"]
+    text = "📊 <b>Joriy holat</b>\n\n"
+    text += f"🪙 Tangalar: {', '.join(coins)}\n"
+    text += f"⏱ Interval: {interval} soniya\n"
+    text += f"\n💡 Maslahat: Interval 15-300 soniya oralig'ida bo'lishi mumkin."
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_admin_live_prices_keyboard().as_markup(),
+    )
+    await callback.answer()
+
+
+@admin_router.callback_query(F.data == "live_coins_edit")
+async def cb_live_coins_edit(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Edit the list of coins to display."""
+    async with get_session() as session:
+        repo = SettingsRepository(session)
+        coins_str = await repo.get_value("live_price_coins")
+
+    current_coins = coins_str or "bitcoin,ethereum,solana,binancecoin,ripple"
+    text = "💊 <b>Tangalarni o'zgartirish</b>\n\n"
+    text += "Hozirgi tangalar:\n"
+    text += f"<code>{current_coins}</code>\n\n"
+    text += "Yangi tangalar ro'yxatini vergul bilan ajratib yuboring:\n"
+    text += "Misol: <code>bitcoin,ethereum,solana,cardano,polkadot</code>\n\n"
+    text += "CoinGecko coin ID laridan foydalaning."
+    await callback.message.edit_text(text, reply_markup=get_cancel_keyboard().as_markup())
+    await state.set_state(LivePriceStates.editing_coins)
+    await callback.answer()
+
+
+@admin_router.message(LivePriceStates.editing_coins)
+async def process_coins_edit(message: types.Message, state: FSMContext, session) -> None:
+    """Save new coins list."""
+    coins_text = message.text.strip()
+    coins = [c.strip() for c in coins_text.split(",") if c.strip()]
+
+    if not coins:
+        await message.answer("❌ Xato: Bo'sh ro'yxat! Qayta kiriting:")
+        return
+
+    async with get_session() as session:
+        repo = SettingsRepository(session)
+        await repo.set_value(
+            "live_price_coins",
+            ",".join(coins),
+            description="Live prices uchun coin ID lar (vergul bilan)",
+        )
+
+    await state.clear()
+    await message.answer(
+        f"✅ Tangalar saqlandi: {', '.join(coins)}\n\nNarxlar keyingi yangilanishda ko'rinadi.",
+        reply_markup=get_admin_live_prices_keyboard().as_markup(),
+    )
+
+
+@admin_router.callback_query(F.data == "live_interval_edit")
+async def cb_live_interval_edit(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Edit the update interval."""
+    async with get_session() as session:
+        repo = SettingsRepository(session)
+        interval = await repo.get_int("live_price_interval", 60)
+
+    text = "⏱ <b>Intervalni o'zgartirish</b>\n\n"
+    text += f"Hozirgi interval: <b>{interval} soniya</b>\n\n"
+    text += "Yangi intervalni soniyalarda kiriting (15-300):\n"
+    text += "Masalan: <code>30</code>, <code>60</code>, <code>120</code>"
+    await callback.message.edit_text(text, reply_markup=get_cancel_keyboard().as_markup())
+    await state.set_state(LivePriceStates.editing_interval)
+    await callback.answer()
+
+
+@admin_router.message(LivePriceStates.editing_interval)
+async def process_interval_edit(message: types.Message, state: FSMContext, session) -> None:
+    """Save new interval."""
+    try:
+        interval = int(message.text.strip())
+        if interval < 15 or interval > 300:
+            await message.answer("❌ Xato: Interval 15-300 soniya oralig'ida bo'lishi kerak! Qayta kiriting:")
+            return
+    except ValueError:
+        await message.answer("❌ Xato: Faqat raqam kiriting! Qayta kiriting:")
+        return
+
+    async with get_session() as session:
+        repo = SettingsRepository(session)
+        await repo.set_value(
+            "live_price_interval",
+            str(interval),
+            value_type="int",
+            description="Live prices yangilash intervali (soniya)",
+        )
+
+    await state.clear()
+    await message.answer(
+        f"✅ Interval saqlandi: har {interval} soniyada\n\nBot qayta ishga tushirilgandan keyin kuchga kiradi.",
+        reply_markup=get_admin_live_prices_keyboard().as_markup(),
+    )
+
+
+@admin_router.callback_query(F.data == "live_refresh_now")
+async def cb_live_refresh_now(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Manually refresh live prices now."""
+    try:
+        live_service = LivePriceService()
+        await live_service.create_or_update_pinned_message()
+        await callback.answer("✅ Narxlar yangilandi!", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"❌ Xatolik: {e}", show_alert=True)

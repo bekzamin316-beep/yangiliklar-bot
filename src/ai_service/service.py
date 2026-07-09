@@ -1,4 +1,4 @@
-"""High-level AI service with retry and fallback support."""
+"""High-level AI service with retry, fallback, and model rotation."""
 
 import logging
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class AIService:
-    """AI service wrapper with retry and fallback."""
+    """AI service wrapper with retry, fallback, and model rotation."""
 
     def __init__(self):
         # Choose provider based on config
@@ -21,7 +21,7 @@ class AIService:
             self.primary = OpenRouterProvider()
         else:
             self.primary = DashScopeProvider()
-            
+
         # Backup provider (if configured)
         if settings.ai_backup_api_key:
             if settings.ai_backup_provider == "openrouter":
@@ -30,9 +30,32 @@ class AIService:
                 self.backup = DashScopeProvider()
         else:
             self.backup = None
-            
+
         # Translator
         self.translator = TranslationService() if settings.enable_translation else None
+
+        # Model rotation
+        self._process_count = 0
+        self._models = settings.ai_models_list
+        self._rotate_every = settings.ai_rotate_every
+        self._current_model_idx = 0
+
+    def _get_current_model(self) -> str:
+        """Return the current model based on rotation state."""
+        if self._rotate_every > 0 and len(self._models) > 1:
+            idx = (self._process_count // self._rotate_every) % len(self._models)
+            return self._models[idx]
+        return self._models[0]
+
+    def _advance_rotation(self) -> None:
+        """Advance the process counter and rotate model if needed."""
+        self._process_count += 1
+        if self._rotate_every > 0 and len(self._models) > 1:
+            old_idx = ((self._process_count - 1) // self._rotate_every) % len(self._models)
+            new_idx = (self._process_count // self._rotate_every) % len(self._models)
+            if old_idx != new_idx:
+                logger.info("Model rotation: %s → %s (item #%d)",
+                            self._models[old_idx], self._models[new_idx], self._process_count)
 
     @retry(
         stop=stop_after_attempt(3),
@@ -52,34 +75,42 @@ class AIService:
         reraise=True,
     )
     async def analyze_news(self, title: str, content: str) -> NewsAnalysis:
-        """Analyze a news article. Falls back to backup provider if primary fails."""
+        """Analyze a news article with model rotation. Falls back to backup provider if primary fails."""
+        model = self._get_current_model()
+        logger.info("Using model: %s (item #%d)", model, self._process_count + 1)
+
         try:
+            # Set the rotated model on the provider
+            self.primary.model = model
             analysis = await self.primary.analyze_news(title, content)
-            
+
             # Translate if enabled
             if self.translator and analysis.summary_uz:
                 analysis.summary_uz = await self.translator.translate_to_uzbek(analysis.summary_uz)
                 analysis.analysis_uz = await self.translator.translate_to_uzbek(analysis.analysis_uz)
-                
+
+            self._advance_rotation()
             return analysis
-            
+
         except Exception as e:
-            logger.warning("Primary AI provider failed: %s", e)
+            logger.warning("Primary AI provider failed (model=%s): %s", model, e)
             if self.backup:
                 try:
                     logger.info("Trying backup AI provider...")
                     analysis = await self.backup.analyze_news(title, content)
-                    
+
                     # Translate if enabled
                     if self.translator and analysis.summary_uz:
                         analysis.summary_uz = await self.translator.translate_to_uzbek(analysis.summary_uz)
                         analysis.analysis_uz = await self.translator.translate_to_uzbek(analysis.analysis_uz)
-                        
+
+                    self._advance_rotation()
                     return analysis
                 except Exception as e2:
                     logger.error("Backup AI provider also failed: %s", e2)
 
             # Return minimal analysis so the news is still saved
+            self._advance_rotation()
             logger.warning("Returning minimal analysis for: %s", title[:50])
             fallback_summary = title[:200]
             if self.translator:

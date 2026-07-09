@@ -2,7 +2,8 @@
 
 import logging
 
-from src.ai_service.summarizer import DashScopeProvider
+from src.core.config import settings
+from src.ai_service.summarizer import DashScopeProvider, OpenRouterProvider
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,10 @@ class TranslationService:
     """Handles translation of AI responses to Uzbek."""
 
     def __init__(self):
-        self.provider = DashScopeProvider()
+        if settings.ai_provider == "openrouter":
+            self.provider = OpenRouterProvider()
+        else:
+            self.provider = DashScopeProvider()
 
     async def translate_to_uzbek(self, text: str) -> str:
         """Translate text from any language to Uzbek using AI."""

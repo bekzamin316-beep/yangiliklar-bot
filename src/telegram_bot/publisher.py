@@ -4,6 +4,7 @@ import logging
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
+from aiogram.exceptions import TelegramBadRequest
 
 from src.core.config import settings
 from src.core.database import get_session
@@ -75,7 +76,14 @@ class Publisher:
             return False
 
     async def send_admin_notification(self, text: str) -> None:
-        """Send a notification to all admin users."""
+        """Send a notification to all admin users.
+
+        If an admin hasn't started a conversation with the bot,
+        Telegram returns 'Bad Request: chat not found'.
+        This is expected — we log it as a warning, not an error.
+        """
+        from aiogram.exceptions import TelegramBadRequest
+
         for admin_id in settings.admin_id_list:
             try:
                 await self.bot.send_message(
@@ -83,5 +91,36 @@ class Publisher:
                     text=text,
                     parse_mode=ParseMode.HTML,
                 )
+            except TelegramBadRequest as e:
+                if "chat not found" in str(e).lower() or "bot can't initiate conversation" in str(e).lower():
+                    logger.warning("Admin %d hasn't started bot yet — notification skipped", admin_id)
+                else:
+                    logger.error("Failed to notify admin %d: %s", admin_id, e)
             except Exception as e:
                 logger.error("Failed to notify admin %d: %s", admin_id, e)
+
+    async def edit_message_text(self, message_id: int, text: str) -> bool:
+        """Edit an existing message.
+
+        Args:
+            message_id: ID of the message to edit
+            text: New text content
+
+        Returns True if successful.
+        """
+        try:
+            await self.bot.edit_message_text(
+                chat_id=self.channel_id,
+                message_id=message_id,
+                text=text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            logger.info("Edited message (msg_id=%d)", message_id)
+            return True
+        except TelegramBadRequest as e:
+            logger.error("Failed to edit message %d: %s", message_id, e)
+            return False
+        except Exception as e:
+            logger.error("Unexpected error editing message %d: %s", message_id, e)
+            return False

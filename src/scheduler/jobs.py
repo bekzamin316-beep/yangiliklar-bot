@@ -10,14 +10,17 @@ from src.ai_service.service import AIService
 from src.news_collector.collector import NewsCollector
 from src.news_collector.processor import NewsProcessor
 from src.telegram_bot.publisher import Publisher
+from src.crypto_prices.live import LivePriceService
 
 logger = logging.getLogger(__name__)
 
 
 async def collect_and_publish_news(publisher: Publisher) -> None:
-    """Scheduler job: collect news → analyze → publish.
+    """Scheduler job: collect news → analyze → publish each immediately.
 
-    This is the main periodic job that runs every NEWS_CHECK_INTERVAL seconds.
+    Each news item is analyzed and published right away,
+    so the channel sees news as soon as it's processed — not after
+    waiting for the entire batch to finish.
     """
     logger.info("=== Starting news collection cycle ===")
 
@@ -30,17 +33,44 @@ async def collect_and_publish_news(publisher: Publisher) -> None:
             logger.info("No new items collected")
             return
 
-        # 2. Process through AI (analyze, filter, save to DB)
+        # 2. Process each item and publish immediately
         ai_service = AIService()
         processor = NewsProcessor(ai_service)
-        processed = await processor.process_items(raw_items)
+        published_count = 0
 
-        if not processed:
-            logger.info("No new items to publish (all duplicates, below threshold, or errors)")
-            return
+        for item in raw_items:
+            try:
+                # Check duplicate
+                existing = await processor._get_by_hash(item.content_hash())
+                if existing:
+                    logger.debug("Skipping duplicate: %s", item.title[:50])
+                    continue
 
-        # 3. Publish to Telegram channel
-        published_count = await publisher.publish_batch(processed)
+                # AI analysis
+                analysis = await ai_service.analyze_news(item.title, item.content)
+
+                # Filter by importance
+                if analysis.importance_score < settings.importance_threshold:
+                    logger.debug(
+                        "Low importance (%d), skipping: %s",
+                        analysis.importance_score, item.title[:50],
+                    )
+                    continue
+
+                # Save to DB
+                news = await processor._save_news(item, analysis)
+                logger.info(
+                    "Processed: %s | score=%d | %s",
+                    item.title[:50], analysis.importance_score, analysis.sentiment,
+                )
+
+                # Publish immediately to channel
+                if await publisher.publish_news(news):
+                    published_count += 1
+
+            except Exception as e:
+                logger.error("Error processing %s: %s", item.title[:50], e)
+
         logger.info("=== Collection cycle complete: %d published ===", published_count)
 
     except Exception as e:
@@ -128,3 +158,12 @@ def _format_digest(today: date, news: list, data: dict) -> str:
         lines.append(f"📢 https://t.me/{settings.telegram_channel_username}")
 
     return "\n".join(lines)
+
+
+async def update_live_prices() -> None:
+    """Scheduler job: update pinned live crypto prices message."""
+    try:
+        live_service = LivePriceService()
+        await live_service.create_or_update_pinned_message()
+    except Exception as e:
+        logger.error("Error updating live prices: %s", e)

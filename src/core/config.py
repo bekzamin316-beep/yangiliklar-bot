@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     telegram_channel_id: str = Field(..., description="Target channel ID")
     telegram_channel_username: str = Field("", description="Target channel username (without @)")
     admin_ids: str = Field("6194170580,240229643", description="Comma-separated admin IDs")
+    admin_password: str = Field("", description="Password for admin panel access")
 
     # Database
     db_type: str = Field("sqlite", description="postgres or sqlite")
@@ -28,13 +29,15 @@ class Settings(BaseSettings):
 
     # AI
     ai_provider: str = Field("openrouter", description="Primary AI provider name")
-    ai_model: str = Field("free", description="AI model name")
+    ai_model: str = Field("free", description="AI model name (default, used when no rotation)")
+    ai_models: str = Field("", description="Comma-separated models for rotation (e.g. qwen3.5-122b-a10b,qwen-plus,qwen-turbo)")
+    ai_rotate_every: int = Field(5, description="Rotate AI model every N processed items (0 = no rotation)")
     dashscope_api_key: str = Field("", description="DashScope API key")
     dashscope_api_base: str = Field(
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
         description="DashScope API base URL",
     )
-    
+
     # OpenRouter
     openrouter_api_key: str = Field("", description="OpenRouter API key")
     openrouter_api_base: str = Field(
@@ -45,7 +48,7 @@ class Settings(BaseSettings):
         "openai/gpt-oss-120b:free,nvidia/nemotron-nano-12b-v2-vl:free,nvidia/nemotron-3-nano-30b-a3b:free",
         description="Comma-separated list of free models",
     )
-    
+
     ai_backup_provider: str = Field("", description="Backup AI provider name")
     ai_backup_api_key: str = Field("", description="Backup AI API key")
 
@@ -65,6 +68,7 @@ class Settings(BaseSettings):
 
     # Scheduler
     news_check_interval: int = Field(300, description="Seconds between news checks")
+    live_price_interval: int = Field(60, description="Seconds between live price updates (default 60)")
     digest_hour: int = Field(23, description="Hour for daily digest")
     digest_minute: int = Field(0, description="Minute for daily digest")
     digest_timezone: str = Field("Asia/Tashkent", description="Timezone for digest")
@@ -84,6 +88,12 @@ class Settings(BaseSettings):
     def rss_source_list(self) -> List[str]:
         """Parse comma-separated RSS URLs into a list."""
         return [url.strip() for url in self.rss_sources.split(",") if url.strip()]
+
+    @cached_property
+    def ai_models_list(self) -> List[str]:
+        """Parse comma-separated AI models for rotation."""
+        models = [m.strip() for m in self.ai_models.split(",") if m.strip()]
+        return models if models else [self.ai_model]
 
     @property
     def is_postgres(self) -> bool:

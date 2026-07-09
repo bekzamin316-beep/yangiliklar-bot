@@ -37,6 +37,20 @@ Importance score: 0-100 (ne qadar muhim, shuncha yuqori)
 ESLATMA: summary_uz va analysis_uz maydonlari FAQAT o'zbek tilida (Lotin alifbosi) bo'lishi shart!
 """
 
+# Runtime override — set via admin panel, persisted in DB
+_custom_analysis_prompt: str | None = None
+
+
+def get_analysis_prompt() -> str:
+    """Return the current analysis prompt (custom override or default)."""
+    return _custom_analysis_prompt if _custom_analysis_prompt else ANALYZE_NEWS_PROMPT
+
+
+def set_analysis_prompt(prompt: str) -> None:
+    """Set a custom analysis prompt (called from admin panel)."""
+    global _custom_analysis_prompt
+    _custom_analysis_prompt = prompt
+
 DIGEST_PROMPT = """Siz kripto yangiliklar tahlilchisidir. Quyidagi yangiliklar asosida kunlik digest tayyorlang va FAQAT JSON formatida natija qaytaring (markdown yo'q, tushuntirish yo'q).
 
 MUHIM: Barcha matn maydonlari FAQAT o'zbek tilida (Lotin alifbosi) yozilishi shart. Rus tilida YO'Q, ingliz tilida YO'Q.
@@ -83,6 +97,7 @@ class DashScopeProvider:
                         "messages": messages,
                         "temperature": 0.7,
                         "max_tokens": 2000,
+                        **({"enable_thinking": False} if "14b" in self.model and "qwen3" in self.model else {}),
                     },
                 )
                 elapsed_ms = (time.monotonic() - start) * 1000
@@ -103,7 +118,7 @@ class DashScopeProvider:
 
     async def analyze_news(self, title: str, content: str) -> NewsAnalysis:
         """Analyze a single news article and return structured analysis."""
-        prompt = ANALYZE_NEWS_PROMPT.format(
+        prompt = get_analysis_prompt().format(
             title=title[:2000],
             content=content[:4000],
         )
@@ -172,6 +187,7 @@ class OpenRouterProvider:
     def __init__(self):
         self.api_base = settings.openrouter_api_base
         self.api_key = settings.openrouter_api_key
+        self.model = settings.ai_model
         self.timeout = settings.request_timeout
 
     async def generate(self, prompt: str, system: str | None = None) -> str:
@@ -195,7 +211,7 @@ class OpenRouterProvider:
                         "Referer": "https://github.com/crypto-news-bot",
                     },
                     json={
-                        "model": settings.ai_model,
+                        "model": self.model,
                         "messages": messages,
                         "temperature": 0.7,
                         "max_tokens": 2000,
@@ -205,7 +221,7 @@ class OpenRouterProvider:
                 resp.raise_for_status()
                 data = resp.json()
                 text = data["choices"][0]["message"]["content"]
-                logger.debug("OpenRouter response in %.0fms, model=%s", elapsed_ms, settings.ai_model)
+                logger.debug("OpenRouter response in %.0fms, model=%s", elapsed_ms, self.model)
                 return text
         except httpx.TimeoutException as e:
             logger.error("OpenRouter timeout (%s): type=%s, url=%s", self.timeout, type(e).__name__, self.api_base)
@@ -219,7 +235,7 @@ class OpenRouterProvider:
 
     async def analyze_news(self, title: str, content: str) -> NewsAnalysis:
         """Analyze a single news article and return structured analysis."""
-        prompt = ANALYZE_NEWS_PROMPT.format(
+        prompt = get_analysis_prompt().format(
             title=title[:2000],
             content=content[:4000],
         )

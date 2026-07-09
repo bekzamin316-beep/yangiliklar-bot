@@ -128,6 +128,19 @@ class NewsProcessor:
         if source:
             lines.append(f"\n📰 {source}")
 
+        # Hashtags — fixed crypto tags + dynamic AI tags
+        hashtags = ["#kripto", "#kriptovalyuta", "#bitcoin"]
+        if news.tags:
+            for tag in news.tags.split(","):
+                tag = tag.strip().replace(" ", "").lower()
+                if tag and tag not in hashtags:
+                    hashtags.append(f"#{tag}")
+        if news.sentiment == "bullish":
+            hashtags.append("#bullish")
+        elif news.sentiment == "bearish":
+            hashtags.append("#bearish")
+        lines.append(f"\n{' '.join(hashtags)}")
+
         # Signature footer on every post
         if settings.telegram_channel_username:
             lines.append(f"\n━━━━━━━━━━━━━━━━━━━━━━\n📢 https://t.me/{settings.telegram_channel_username}")
