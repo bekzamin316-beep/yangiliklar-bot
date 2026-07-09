@@ -1,5 +1,6 @@
 """RSS source repository."""
 
+from datetime import datetime
 from typing import Optional, Sequence
 
 from sqlalchemy import select
@@ -85,7 +86,13 @@ class RSSSourceRepository(BaseRepository[RSSSource]):
                 if keyword in url.lower().replace("-", ""):
                     name = display_name
                     break
-            values.append({"name": name, "url": url, "is_active": True})
+            values.append({
+                "name": name,
+                "url": url,
+                "is_active": True,
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+            })
 
         if not values:
             return

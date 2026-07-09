@@ -51,7 +51,7 @@ class RSSSource(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     url: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    last_fetched_at: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_fetched_at: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True, name="last_fetched")
     fetch_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     error_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
