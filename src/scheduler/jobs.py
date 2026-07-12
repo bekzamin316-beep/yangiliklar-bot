@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 from src.core.config import settings
 from src.core.database import get_session
 from src.core.repositories import NewsRepository, DigestRepository
+from src.ai_service.service import AIService
 from src.news_collector.collector import NewsCollector
 from src.news_collector.dedup_cache import DedupCache
 from src.news_collector.processor import NewsProcessor
