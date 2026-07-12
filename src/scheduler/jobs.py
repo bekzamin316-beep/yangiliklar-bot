@@ -91,53 +91,76 @@ async def collect_and_publish_news(publisher: Publisher) -> None:
 async def generate_daily_digest(publisher: Publisher) -> None:
     """Scheduler job: generate and publish daily digest.
 
-    Runs once per day at DIGEST_HOUR:DIGEST_MINUTE.
+    Reads original source content (Telegram posts + web articles),
+    uses AI to deduplicate, merge, sort by importance, and format
+    as concise 1–3 sentence items with source links.
     """
     logger.info("=== Starting daily digest generation ===")
 
     try:
         today = date.today()
 
-        # 1. Get today's news
+        # 1. Get today's news from DB
         async with get_session() as session:
             news_repo = NewsRepository(session)
-            today_news = await news_repo.get_recent(hours=24, limit=20)
+            today_news = await news_repo.get_recent(hours=24, limit=30)
 
         if not today_news:
             logger.info("No news today, skipping digest")
             return
 
-        # 2. Format digest message as a list of news items
-        digest_text = _format_digest(today, today_news)
+        # 2. Fetch original content from source URLs (web articles + Telegram posts)
+        from src.digest.content_fetcher import ContentFetcher
+        fetcher = ContentFetcher()
+        source_contents = await fetcher.fetch_all_sources(today_news)
 
-        # 3. Publish to channel
+        # Also read configured Telegram channel sources
+        channel_posts = await fetcher.fetch_channel_sources(hours=24)
+
+        # 3. Generate digest via AI
+        from src.digest.digest_generator import DigestGenerator
+        generator = DigestGenerator()
+        digest_items = await generator.generate(today_news, source_contents)
+
+        # 4. Format digest message
+        digest_text = _format_digest(today, digest_items)
+
+        # 5. Publish to channel
         await publisher.publish_digest(digest_text)
 
-        # 4. Save to DB
+        # 6. Save to DB
+        ai_summary = " ".join(item["text"] for item in digest_items[:3])
+        most_bullish = next((item["text"] for item in digest_items if item.get("sentiment") == "bullish"), "")
+        most_bearish = next((item["text"] for item in digest_items if item.get("sentiment") == "bearish"), "")
+
         async with get_session() as session:
             digest_repo = DigestRepository(session)
             existing = await digest_repo.get_by_date(today)
             if existing:
                 await digest_repo.update(
                     existing.id,
-                    ai_summary="",
+                    ai_summary=ai_summary,
                     full_text=digest_text,
-                    most_bullish="",
-                    most_bearish="",
+                    most_bullish=most_bullish,
+                    most_bearish=most_bearish,
                     is_published=True,
                 )
             else:
                 await digest_repo.create(
                     digest_date=today,
                     news_count=len(today_news),
-                    ai_summary="",
+                    ai_summary=ai_summary,
                     full_text=digest_text,
-                    most_bullish="",
-                    most_bearish="",
+                    most_bullish=most_bullish,
+                    most_bearish=most_bearish,
                     is_published=True,
                 )
 
-        logger.info("=== Daily digest complete: %d news items ===", len(today_news))
+        # 7. Clean up
+        await fetcher.close()
+        await generator.close()
+
+        logger.info("=== Daily digest complete: %d news → %d digest items ===", len(today_news), len(digest_items))
 
     except Exception as e:
         logger.error("Error in generate_daily_digest: %s", e, exc_info=True)
@@ -155,30 +178,30 @@ def _sentiment_emoji(sentiment: str | None) -> str:
     return "⚪️"
 
 
-def _format_digest(today: date, news: list) -> str:
-    """Format a daily digest as a Telegram HTML list of news items."""
+def _format_digest(today: date, digest_items: list[dict]) -> str:
+    """Format AI-generated digest items as a Telegram HTML message.
+
+    Each item is 1–3 sentences with a sentiment emoji and source link.
+    """
     lines = [
         "📰 <b>Kunlik kripto yangiliklar digesti</b>",
         f"📅 {today.strftime('%d.%m.%Y')}",
-        f"📊 {len(news)} ta yangilik",
+        f"📊 {len(digest_items)} ta asosiy yangilik",
         "",
     ]
 
-    channel = settings.telegram_channel_username or ""
     separator = "—" * 30
 
-    for item in news:
-        emoji = _sentiment_emoji(getattr(item, "sentiment", None))
-        title = getattr(item, "title", "") or ""
-        message_id = getattr(item, "channel_message_id", None)
+    for item in digest_items:
+        text = item.get("text", "")
+        sentiment = item.get("sentiment", "neutral")
+        source_link = item.get("source_link", "")
+        emoji = _sentiment_emoji(sentiment)
 
-        if channel and message_id:
-            link = f"https://t.me/{channel}/{message_id}"
-            line = f"{emoji} <a href=\"{link}\">{title}</a>"
-        elif getattr(item, "source_url", None):
-            line = f"{emoji} <a href=\"{item.source_url}\">{title}</a>"
+        if source_link:
+            line = f"{emoji} {text}\n🔗 <a href=\"{source_link}\">Batafsil</a>"
         else:
-            line = f"{emoji} {title}"
+            line = f"{emoji} {text}"
 
         lines.append(line)
         lines.append(separator)

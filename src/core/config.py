@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     digest_minute: int = Field(0, description="Minute for daily digest")
     digest_timezone: str = Field("Asia/Tashkent", description="Timezone for digest")
 
+    # Telegram Client (Telethon) — for reading channel posts in digest
+    telegram_api_id: int = Field(0, description="Telegram API ID from my.telegram.org")
+    telegram_api_hash: str = Field("", description="Telegram API hash from my.telegram.org")
+    telegram_session_name: str = Field("digest_session", description="Telethon session file name")
+    digest_source_channels: str = Field("", description="Comma-separated Telegram channel usernames/IDs to read for digest (e.g., @cripto7yangilik)")
+
     # General
     log_level: str = Field("INFO", description="Logging level")
     request_timeout: int = Field(30, description="HTTP request timeout in seconds")
