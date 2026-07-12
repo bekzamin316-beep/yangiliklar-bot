@@ -31,6 +31,27 @@ _BINANCE_SYMBOL_MAP = {
     "shiba-inu": "1000SHIBUSDT",
 }
 
+# CoinGecko ID → CoinCap ID mapping
+_COINCAP_MAP = {
+    "bitcoin": "bitcoin",
+    "ethereum": "ethereum",
+    "solana": "solana",
+    "binancecoin": "binance-coin",
+    "ripple": "xrp",
+    "cardano": "cardano",
+    "dogecoin": "dogecoin",
+    "tron": "tron",
+    "near": "near-protocol",
+    "chainlink": "chainlink",
+    "polkadot": "polkadot",
+    "litecoin": "litecoin",
+    "avalanche-2": "avalanche",
+    "polygon": "matic-network",
+    "aptos": "aptos",
+    "pepe": "pepe",
+    "shiba-inu": "shiba-inu",
+}
+
 # Binance symbol → CoinGecko ID reverse mapping
 _BINANCE_REVERSE_MAP = {v: k for k, v in _BINANCE_SYMBOL_MAP.items()}
 
@@ -76,6 +97,14 @@ class CryptoPriceService:
         # CoinGecko failed → Binance fallback
         logger.info("CoinGecko failed, falling back to Binance API")
         result = await self._fetch_binance(coin_ids)
+        if result:
+            self._cache = result
+            self._cache_ts = now
+            return result
+
+        # Both failed → CoinCap fallback
+        logger.info("Binance failed, falling back to CoinCap API")
+        result = await self._fetch_coincap(coin_ids)
         if result:
             self._cache = result
             self._cache_ts = now
@@ -133,6 +162,31 @@ class CryptoPriceService:
             return {}
         except Exception as e:
             logger.error("CoinGecko fetch failed: %s", e)
+            return {}
+
+    async def _fetch_coincap(self, coin_ids: list[str]) -> dict:
+        """Fetch from CoinCap API (free, no key, no regional blocks)."""
+        result = {}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
+                for coin_id in coin_ids:
+                    coincap_id = _COINCAP_MAP.get(coin_id, coin_id)
+                    resp = await client.get(
+                        f"https://api.coincap.io/v2/assets/{coincap_id}",
+                    )
+                    if resp.status_code != 200:
+                        logger.warning("CoinCap %s returned %d", coincap_id, resp.status_code)
+                        continue
+                    data = resp.json().get("data", {})
+                    if data:
+                        result[coin_id] = {
+                            "price": float(data.get("priceUsd", 0)),
+                            "change_24h": float(data.get("changePercent24Hr", 0)),
+                        }
+                return result
+
+        except Exception as e:
+            logger.error("CoinCap fetch failed: %s", e)
             return {}
 
     async def _fetch_binance(self, coin_ids: list[str]) -> dict:
