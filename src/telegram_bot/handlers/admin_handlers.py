@@ -8,6 +8,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 
 from src.core.config import settings
+from src.core.database import get_session
 from src.core.repositories import (
     NewsRepository,
     RSSSourceRepository,
@@ -15,7 +16,8 @@ from src.core.repositories import (
     DigestRepository,
     LogRepository,
 )
-from src.crypto_prices.live import LivePriceService
+# Lazy import to avoid circular dependency
+# from src.crypto_prices.live import LivePriceService
 from src.telegram_bot.filters.admin_filter import AdminFilter
 from src.telegram_bot.kb.keyboards import (
     get_admin_main_keyboard,
@@ -1024,9 +1026,26 @@ async def process_interval_edit(message: types.Message, state: FSMContext, sessi
 @admin_router.callback_query(F.data == "live_refresh_now")
 async def cb_live_refresh_now(callback: types.CallbackQuery, state: FSMContext) -> None:
     """Manually refresh live prices now."""
+    if not await _require_auth(callback, state):
+        return
     try:
-        live_service = LivePriceService()
+        from src.scheduler.jobs import get_live_price_service
+        live_service = get_live_price_service()
         await live_service.create_or_update_pinned_message()
         await callback.answer("✅ Narxlar yangilandi!", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"❌ Xatolik: {e}", show_alert=True)
+
+
+@admin_router.callback_query(F.data == "live_reset_pinned")
+async def cb_live_reset_pinned(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Delete the tracked live price message and create a fresh pinned one."""
+    if not await _require_auth(callback, state):
+        return
+    try:
+        from src.scheduler.jobs import get_live_price_service
+        live_service = get_live_price_service()
+        await live_service.reset_pinned_message()
+        await callback.answer("✅ Eski xabar o'chirildi va yangi live narx xabari yaratildi!", show_alert=True)
     except Exception as e:
         await callback.answer(f"❌ Xatolik: {e}", show_alert=True)

@@ -4,6 +4,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from aiogram.exceptions import TelegramAPIError
+
 from src.core.config import settings
 from src.core.database import get_session
 from src.core.repositories import SettingsRepository
@@ -14,7 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 class LivePriceService:
-    """Manages live crypto price display in channel."""
+    """Manages live crypto price display in channel.
+
+    Implemented as a singleton so the scheduler and admin handlers share the
+    same in-memory state and never create duplicate pinned messages.
+    """
+
+    _instance: "LivePriceService | None" = None
+    _lock: asyncio.Lock | None = None
+
+    def __new__(cls) -> "LivePriceService":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._lock = asyncio.Lock()
+        return cls._instance
 
     def __init__(self):
         self.bot = Bot(token=settings.telegram_bot_token)
@@ -86,52 +101,109 @@ class LivePriceService:
             logger.error("Failed to format price message: %s", e)
             return "❌ Narxlarni olishda xatolik"
 
+    async def _try_delete_message(self, message_id: int) -> bool:
+        """Try to delete a channel message by ID. Return True if successful."""
+        try:
+            await self.bot.delete_message(chat_id=self.channel_id, message_id=message_id)
+            return True
+        except TelegramAPIError as e:
+            logger.debug("Could not delete message (msg_id=%d): %s", message_id, e)
+            return False
+
     async def create_or_update_pinned_message(self) -> int:
         """Create or update the pinned price message in channel.
 
         If the pinned message was deleted, creates a new one immediately.
         Returns the message_id.
         """
-        await self._load_message_id()
+        if self._lock is None:
+            # Defensive: __new__ always initializes the lock, but keep type checker happy
+            raise RuntimeError("LivePriceService lock is not initialized")
 
-        coins = await self.get_configured_coins()
-        text = await self.format_price_message(coins)
+        async with self._lock:
+            await self._load_message_id()
 
-        if self.message_id:
+            coins = await self.get_configured_coins()
+            text = await self.format_price_message(coins)
+
+            if self.message_id:
+                try:
+                    await self.bot.edit_message_text(
+                        chat_id=self.channel_id,
+                        message_id=self.message_id,
+                        text=text,
+                        disable_web_page_preview=True,
+                    )
+                    logger.info("Updated live price message (msg_id=%d)", self.message_id)
+                    return self.message_id
+                except TelegramAPIError as e:
+                    error_msg = str(e).lower()
+                    # Message was deleted or otherwise unavailable — need a new one.
+                    if any(
+                        phrase in error_msg
+                        for phrase in (
+                            "message to edit not found",
+                            "message_id_invalid",
+                            "message can't be edited",
+                            "message is not modified",
+                        )
+                    ):
+                        logger.warning(
+                            "Live price message (msg_id=%d) unavailable: %s — re-creating",
+                            self.message_id, e,
+                        )
+                    else:
+                        logger.error(
+                            "Failed to edit live price message (msg_id=%d): %s",
+                            self.message_id, e,
+                        )
+                        # Don't create a duplicate for transient errors.
+                        return self.message_id
+
+                # Old message is gone; try to remove it (best effort) and create a new one.
+                old_message_id = self.message_id
+                self.message_id = None
+                await self._save_message_id()
+                await self._try_delete_message(old_message_id)
+
+            msg = await self.bot.send_message(
+                chat_id=self.channel_id,
+                text=text,
+                disable_web_page_preview=True,
+            )
+            self.message_id = msg.message_id
+            await self._save_message_id()
+            logger.info("Created live price message (msg_id=%d)", self.message_id)
+
             try:
-                await self.bot.edit_message_text(
+                await self.bot.pin_chat_message(
                     chat_id=self.channel_id,
                     message_id=self.message_id,
-                    text=text,
-                    disable_web_page_preview=True,
+                    disable_notification=True,
                 )
-                logger.info("Updated live price message (msg_id=%d)", self.message_id)
-                return self.message_id
-            except Exception as e:
-                logger.warning(
-                    "Failed to edit live price message (msg_id=%d): %s — re-creating",
-                    self.message_id, e,
-                )
+                logger.info("Pinned live price message")
+            except TelegramAPIError as e:
+                logger.warning("Could not pin live price message: %s", e)
+
+            return self.message_id
+
+    async def reset_pinned_message(self) -> int:
+        """Delete the currently tracked message and create a fresh one.
+
+        Useful when there are duplicate live price messages in the channel and
+        the admin wants to start clean.
+        """
+        if self._lock is None:
+            raise RuntimeError("LivePriceService lock is not initialized")
+
+        async with self._lock:
+            await self._load_message_id()
+            if self.message_id:
+                await self._try_delete_message(self.message_id)
                 self.message_id = None
                 await self._save_message_id()
 
-        msg = await self.bot.send_message(
-            chat_id=self.channel_id,
-            text=text,
-            disable_web_page_preview=True,
-        )
-        self.message_id = msg.message_id
-        await self._save_message_id()
-        logger.info("Created live price message (msg_id=%d)", self.message_id)
-
-        await self.bot.pin_chat_message(
-            chat_id=self.channel_id,
-            message_id=self.message_id,
-            disable_notification=True,
-        )
-        logger.info("Pinned live price message")
-
-        return self.message_id
+        return await self.create_or_update_pinned_message()
 
     async def run_loop(self) -> None:
         """Main loop: fetch prices and update pinned message."""

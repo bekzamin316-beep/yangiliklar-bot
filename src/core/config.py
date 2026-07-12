@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # Scheduler
     news_check_interval: int = Field(300, description="Seconds between news checks")
     live_price_interval: int = Field(60, description="Seconds between live price updates (default 60)")
-    digest_hour: int = Field(23, description="Hour for daily digest")
+    digest_hour: int = Field(0, description="Hour for daily digest")
     digest_minute: int = Field(0, description="Minute for daily digest")
     digest_timezone: str = Field("Asia/Tashkent", description="Timezone for digest")
 

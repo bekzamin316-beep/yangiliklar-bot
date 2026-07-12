@@ -1,36 +1,96 @@
-"""Crypto Price API — CoinGecko integration."""
+"""Crypto Price API — CoinGecko + Binance fallback with in-memory cache."""
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+import time
 
 import httpx
 
+from src.core.config import settings
+
 logger = logging.getLogger(__name__)
+
+# CoinGecko ID → Binance symbol mapping
+_BINANCE_SYMBOL_MAP = {
+    "bitcoin": "BTCUSDT",
+    "ethereum": "ETHUSDT",
+    "solana": "SOLUSDT",
+    "binancecoin": "BNBUSDT",
+    "ripple": "XRPUSDT",
+    "cardano": "ADAUSDT",
+    "dogecoin": "DOGEUSDT",
+    "tron": "TRXUSDT",
+    "near": "NEARUSDT",
+    "chainlink": "LINKUSDT",
+    "polkadot": "DOTUSDT",
+    "litecoin": "LTCUSDT",
+    "avalanche-2": "AVAXUSDT",
+    "polygon": "MATICUSDT",
+    "aptos": "APTUSDT",
+    "pepe": "1000PEPEUSDT",
+    "shiba-inu": "1000SHIBUSDT",
+}
+
+# Binance symbol → CoinGecko ID reverse mapping
+_BINANCE_REVERSE_MAP = {v: k for k, v in _BINANCE_SYMBOL_MAP.items()}
 
 
 class CryptoPriceService:
-    """Fetch cryptocurrency prices from CoinGecko API."""
+    """Fetch crypto prices with CoinGecko primary + Binance fallback + cache."""
 
-    BASE_URL = "https://api.coingecko.com/api/v3"
+    COINGECKO_URL = "https://api.coingecko.com/api/v3"
+    BINANCE_URL = "https://api.binance.com/api/v3"
+
+    # In-memory cache
+    _cache: dict = {}
+    _cache_ts: float = 0.0
+    _cache_ttl: int = 30  # seconds — reuse data if fresh enough
 
     def __init__(self):
-        self.api_key = None  # CoinGecko free tier doesn't require API key
+        self.api_key = settings.coingecko_api_key or None
         self.timeout = 15
 
     async def fetch_prices(self, coin_ids: list[str], vs_currency: str = "usd") -> dict:
-        """Fetch current prices for multiple coins.
+        """Fetch prices: cache → CoinGecko → Binance fallback.
 
-        Args:
-            coin_ids: List of CoinGecko coin IDs (e.g., 'bitcoin', 'ethereum', 'solana')
-            vs_currency: Currency to price in (default 'usd')
-
-        Returns:
-            Dict mapping coin_id -> {'price': float, 'change_24h': float}
+        Returns dict mapping coin_id → {'price': float, 'change_24h': float}
         """
         if not coin_ids:
             return {}
 
+        # Return cache if still fresh
+        now = time.monotonic()
+        if self._cache and (now - self._cache_ts) < self._cache_ttl:
+            cached = {k: v for k, v in self._cache.items() if k in coin_ids}
+            if len(cached) == len(coin_ids):
+                logger.debug("Using cached prices (age=%.1fs)", now - self._cache_ts)
+                return cached
+
+        # Try CoinGecko first
+        result = await self._fetch_coingecko(coin_ids, vs_currency)
+        if result:
+            self._cache = result
+            self._cache_ts = now
+            return result
+
+        # CoinGecko failed → Binance fallback
+        logger.info("CoinGecko failed, falling back to Binance API")
+        result = await self._fetch_binance(coin_ids)
+        if result:
+            self._cache = result
+            self._cache_ts = now
+            return result
+
+        # Both failed → return stale cache if available
+        if self._cache:
+            logger.warning("All APIs failed — using stale cache (age=%.1fs)", now - self._cache_ts)
+            return {k: v for k, v in self._cache.items() if k in coin_ids}
+
+        logger.error("No price data available (no cache, all APIs failed)")
+        return {}
+
+    async def _fetch_coingecko(self, coin_ids: list[str], vs_currency: str = "usd") -> dict:
+        """Fetch from CoinGecko. Returns empty dict on any failure."""
         params = {
             "ids": ",".join(coin_ids),
             "vs_currencies": vs_currency,
@@ -38,13 +98,20 @@ class CryptoPriceService:
             "include_24hr_high": "false",
             "include_24hr_low": "false",
         }
+        headers = {}
+        if self.api_key:
+            headers["x-cg-demo-api-key"] = self.api_key
 
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
                 resp = await client.get(
-                    f"{self.BASE_URL}/simple/price",
+                    f"{self.COINGECKO_URL}/simple/price",
                     params=params,
+                    headers=headers,
                 )
+                if resp.status_code == 429:
+                    logger.warning("CoinGecko rate limited (429) — will use fallback")
+                    return {}
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -58,17 +125,68 @@ class CryptoPriceService:
                         }
                 return result
 
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                logger.warning("CoinGecko rate limited (429)")
+                return {}
+            logger.error("CoinGecko HTTP error: %s", e)
+            return {}
         except Exception as e:
-            logger.error("Failed to fetch crypto prices: %s", e)
+            logger.error("CoinGecko fetch failed: %s", e)
+            return {}
+
+    async def _fetch_binance(self, coin_ids: list[str]) -> dict:
+        """Fetch from Binance API as fallback. Returns empty dict on failure."""
+        symbols = []
+        for coin_id in coin_ids:
+            sym = _BINANCE_SYMBOL_MAP.get(coin_id)
+            if sym:
+                symbols.append(sym)
+
+        if not symbols:
+            logger.warning("No Binance symbols found for coin_ids: %s", coin_ids)
+            return {}
+
+        result = {}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
+                for symbol in symbols:
+                    resp = await client.get(
+                        f"{self.BINANCE_URL}/ticker/24hr",
+                        params={"symbol": symbol},
+                    )
+                    if resp.status_code != 200:
+                        logger.warning("Binance %s returned %d", symbol, resp.status_code)
+                        continue
+                    data = resp.json()
+
+                    coin_id = _BINANCE_REVERSE_MAP.get(symbol)
+                    if coin_id:
+                        price = float(data.get("lastPrice", 0))
+                        change = float(data.get("priceChangePercent", 0))
+                        result[coin_id] = {
+                            "price": price,
+                            "change_24h": change,
+                        }
+
+                return result
+
+        except Exception as e:
+            logger.error("Binance fetch failed: %s", e)
             return {}
 
     async def get_coin_ids(self) -> list[str]:
         """Get list of supported coin IDs."""
+        headers = {}
+        if self.api_key:
+            headers["x-cg-demo-api-key"] = self.api_key
+
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
                 resp = await client.get(
-                    f"{self.BASE_URL}/coins/list",
+                    f"{self.COINGECKO_URL}/coins/list",
                     params={"per_page": 50, "page": 1},
+                    headers=headers,
                 )
                 resp.raise_for_status()
                 coins = resp.json()
@@ -81,13 +199,10 @@ class CryptoPriceService:
     def format_price(price: float, coin_id: str) -> str:
         """Format price for display."""
         if coin_id in ["bitcoin", "ethereum", "avalanche-2", "matic-network"]:
-            # >= $1 coins — show 2 decimal places
             return f"${price:,.2f}"
         elif price >= 0.01:
-            # $0.01-$0.99 — show 4 decimal places
             return f"${price:.4f}"
         else:
-            # < $0.01 — show scientific notation
             return f"${price:.8f}"
 
     @staticmethod
@@ -129,15 +244,7 @@ class CryptoPriceService:
 async def main():
     """Test the price service."""
     service = CryptoPriceService()
-
-    # Default coins to track
-    coin_ids = [
-        "bitcoin",
-        "ethereum",
-        "solana",
-        "binancecoin",
-        "ripple",
-    ]
+    coin_ids = ["bitcoin", "ethereum", "solana", "binancecoin", "ripple"]
 
     prices = await service.fetch_prices(coin_ids)
     for coin_id, data in prices.items():

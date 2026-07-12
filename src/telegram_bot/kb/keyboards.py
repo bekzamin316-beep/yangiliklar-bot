@@ -99,9 +99,10 @@ def get_admin_live_prices_keyboard() -> InlineKeyboardBuilder:
     kb.button(text="💊 Tangalarni o'zgartirish", callback_data="live_coins_edit")
     kb.button(text="⏱ Intervalni o'zgartirish", callback_data="live_interval_edit")
     kb.button(text="🔄 Hozir yangilash", callback_data="live_refresh_now")
+    kb.button(text="🧹 Eski xabarni o'chirish va qayta yaratish", callback_data="live_reset_pinned")
     kb.button(text="📊 Joriy holat", callback_data="live_status")
     kb.button(text="🔙 Orqaga", callback_data="admin_main")
-    kb.adjust(1, 1, 1, 1)
+    kb.adjust(1, 1, 1, 1, 1)
     return kb
 
 

@@ -6,7 +6,6 @@ from datetime import date, datetime, timezone
 from src.core.config import settings
 from src.core.database import get_session
 from src.core.repositories import NewsRepository, DigestRepository
-from src.ai_service.service import AIService
 from src.news_collector.collector import NewsCollector
 from src.news_collector.dedup_cache import DedupCache
 from src.news_collector.processor import NewsProcessor
@@ -97,7 +96,6 @@ async def generate_daily_digest(publisher: Publisher) -> None:
 
     try:
         today = date.today()
-        ai_service = AIService()
 
         # 1. Get today's news
         async with get_session() as session:
@@ -108,33 +106,33 @@ async def generate_daily_digest(publisher: Publisher) -> None:
             logger.info("No news today, skipping digest")
             return
 
-        # 2. Generate digest with AI
-        news_dicts = [
-            {"title": n.title, "summary": n.summary or ""}
-            for n in today_news
-        ]
-        digest_data = await ai_service.create_digest(news_dicts)
+        # 2. Format digest message as a list of news items
+        digest_text = _format_digest(today, today_news)
 
-        # 3. Format digest message
-        digest_text = _format_digest(today, today_news, digest_data)
-
-        # 4. Publish to channel
+        # 3. Publish to channel
         await publisher.publish_digest(digest_text)
 
-        # 5. Save to DB
+        # 4. Save to DB
         async with get_session() as session:
             digest_repo = DigestRepository(session)
             existing = await digest_repo.get_by_date(today)
             if existing:
-                await digest_repo.update(existing.id, ai_summary=digest_data.get("summary"))
+                await digest_repo.update(
+                    existing.id,
+                    ai_summary="",
+                    full_text=digest_text,
+                    most_bullish="",
+                    most_bearish="",
+                    is_published=True,
+                )
             else:
                 await digest_repo.create(
                     digest_date=today,
                     news_count=len(today_news),
-                    ai_summary=digest_data.get("summary"),
+                    ai_summary="",
                     full_text=digest_text,
-                    most_bullish=digest_data.get("most_bullish"),
-                    most_bearish=digest_data.get("most_bearish"),
+                    most_bullish="",
+                    most_bearish="",
                     is_published=True,
                 )
 
@@ -144,37 +142,66 @@ async def generate_daily_digest(publisher: Publisher) -> None:
         logger.error("Error in generate_daily_digest: %s", e, exc_info=True)
 
 
-def _format_digest(today: date, news: list, data: dict) -> str:
-    """Format a daily digest as a Telegram HTML message."""
-    summary = data.get("summary", "Bugun kriptovalyuta bozorida turli xil yangiliklar bo'ldi.")
-    most_bullish = data.get("most_bullish", "")
-    most_bearish = data.get("most_bearish", "")
+def _sentiment_emoji(sentiment: str | None) -> str:
+    """Map a sentiment string to an emoji indicator."""
+    if not sentiment:
+        return "⚪️"
+    s = sentiment.lower()
+    if s in ("positive", "bullish", "optimistic", "positive-ish"):
+        return "🟢"
+    if s in ("negative", "bearish", "pessimistic"):
+        return "🔴"
+    return "⚪️"
 
+
+def _format_digest(today: date, news: list) -> str:
+    """Format a daily digest as a Telegram HTML list of news items."""
     lines = [
-        f"📰 <b>Kundalik Kripto Digest</b>",
+        "📰 <b>Kunlik kripto yangiliklar digesti</b>",
         f"📅 {today.strftime('%d.%m.%Y')}",
-        f"📊 {len(news)} ta yangilik tahlil qilindi",
+        f"📊 {len(news)} ta yangilik",
         "",
-        f"📝 <b>Xulosa:</b>",
-        summary,
     ]
 
-    if most_bullish:
-        lines.extend(["", f"🟢 <b>Eng ijobiy:</b> {most_bullish}"])
-    if most_bearish:
-        lines.extend(["", f"🔴 <b>Eng salbiy:</b> {most_bearish}"])
+    channel = settings.telegram_channel_username or ""
+    separator = "—" * 30
 
-    lines.extend(["", "━━━━━━━━━━━━━━━━━━━━━━"])
-    if settings.telegram_channel_username:
-        lines.append(f"📢 https://t.me/{settings.telegram_channel_username}")
+    for item in news:
+        emoji = _sentiment_emoji(getattr(item, "sentiment", None))
+        title = getattr(item, "title", "") or ""
+        message_id = getattr(item, "channel_message_id", None)
+
+        if channel and message_id:
+            link = f"https://t.me/{channel}/{message_id}"
+            line = f"{emoji} <a href=\"{link}\">{title}</a>"
+        elif getattr(item, "source_url", None):
+            line = f"{emoji} <a href=\"{item.source_url}\">{title}</a>"
+        else:
+            line = f"{emoji} {title}"
+
+        lines.append(line)
+        lines.append(separator)
 
     return "\n".join(lines)
+
+
+# Reuse the same LivePriceService instance across the scheduler and admin handlers
+# to avoid duplicate pinned messages when refreshes overlap.
+_live_price_service: LivePriceService | None = None
+
+
+def get_live_price_service() -> LivePriceService:
+    """Return the shared LivePriceService singleton."""
+    global _live_price_service
+    if _live_price_service is None:
+        _live_price_service = LivePriceService()
+    return _live_price_service
 
 
 async def update_live_prices() -> None:
     """Scheduler job: update pinned live crypto prices message."""
     try:
-        live_service = LivePriceService()
+        live_service = get_live_price_service()
         await live_service.create_or_update_pinned_message()
     except Exception as e:
         logger.error("Error updating live prices: %s", e)
