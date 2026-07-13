@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import httpx
 from bs4 import BeautifulSoup
 from telethon import TelegramClient
+from telethon.sessions import StringSession
 
 from src.core.config import settings
 
@@ -30,7 +31,7 @@ class ContentFetcher:
         self._tl_connected = False
 
     async def _get_telethon_client(self) -> TelegramClient | None:
-        """Lazily create and connect a Telethon client if api_id is configured."""
+        """Lazily create and connect a Telethon client using StringSession."""
         if not settings.telegram_api_id or not settings.telegram_api_hash:
             logger.debug("Telethon not configured (no api_id/api_hash), skipping Telegram fetches")
             return None
@@ -39,8 +40,12 @@ class ContentFetcher:
             return self._tl_client
 
         try:
+            # Use StringSession (stored in env var) instead of file-based session
+            session_str = getattr(settings, 'telegram_session_string', '') or ''
+            session = StringSession(session_str) if session_str else settings.telegram_session_name
+
             client = TelegramClient(
-                settings.telegram_session_name,
+                session,
                 settings.telegram_api_id,
                 settings.telegram_api_hash,
             )
@@ -48,7 +53,7 @@ class ContentFetcher:
 
             if not await client.is_user_authorized():
                 logger.warning("Telethon session not authorized — digest cannot read Telegram channel posts. "
-                               "Run the bot once interactively to complete auth, or provide a pre-created session file.")
+                               "Set TELEGRAM_SESSION_STRING env var with a valid StringSession.")
                 await client.disconnect()
                 return None
 

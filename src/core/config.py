@@ -77,7 +77,8 @@ class Settings(BaseSettings):
     telegram_api_id: int = Field(0, description="Telegram API ID from my.telegram.org")
     telegram_api_hash: str = Field("", description="Telegram API hash from my.telegram.org")
     telegram_session_name: str = Field("digest_session", description="Telethon session file name")
-    digest_source_channels: str = Field("", description="Comma-separated Telegram channel usernames/IDs to read for digest (e.g., @cripto7yangilik)")
+    telegram_session_string: str = Field("", description="Telethon StringSession for Railway deployment (no file needed)")
+    digest_source_channels: str = Field("", description="Comma-separated Telegram channel usernames/IDs to read for digest")
 
     # General
     log_level: str = Field("INFO", description="Logging level")
