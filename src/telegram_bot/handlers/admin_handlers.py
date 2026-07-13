@@ -613,6 +613,26 @@ async def cb_digest_send_now(callback: types.CallbackQuery) -> None:
         logger.error("Manual digest failed: %s", e)
 
 
+@admin_router.callback_query(F.data == "admin_digest_test")
+async def cb_admin_digest_test(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Manually trigger daily digest for testing — with auth check."""
+    if not await _require_auth(callback, state):
+        return
+
+    await callback.answer("📰 Digest test boshlandi...", show_alert=True)
+
+    try:
+        from src.telegram_bot.publisher import Publisher
+        from src.scheduler.jobs import generate_daily_digest
+        bot = callback.bot
+        publisher = Publisher(bot)
+        await generate_daily_digest(publisher)
+        await callback.message.answer("✅ <b>Digest test muvaffaqiyatli — yuborildi!</b>")
+    except Exception as e:
+        await callback.message.answer(f"❌ <b>Digest test xato:</b> {e}")
+        logger.error("Digest test failed: %s", e)
+
+
 @admin_router.callback_query(F.data == "digest_history")
 async def cb_digest_history(callback: types.CallbackQuery, session) -> None:
     digest_repo = DigestRepository(session)
