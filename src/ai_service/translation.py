@@ -2,6 +2,8 @@
 
 import logging
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 from src.core.config import settings
 from src.ai_service.summarizer import DashScopeProvider, OpenRouterProvider
 
@@ -9,14 +11,19 @@ logger = logging.getLogger(__name__)
 
 
 class TranslationService:
-    """Handles translation of AI responses to Uzbek."""
+    """Handles translation of AI responses to Uzbek — always uses DashScope for reliability."""
 
     def __init__(self):
-        if settings.ai_provider == "openrouter":
-            self.provider = OpenRouterProvider()
-        else:
-            self.provider = DashScopeProvider()
+        # Always use DashScope for translation (no rate limits, works reliably)
+        self.provider = DashScopeProvider()
+        self.provider.model = "qwen-turbo"  # Fast + cheap model for translation
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=2, min=4, max=30),
+        retry=retry_if_exception_type(Exception),
+        reraise=False,
+    )
     async def translate_to_uzbek(self, text: str) -> str:
         """Translate text from any language to Uzbek using AI."""
         if not text.strip():

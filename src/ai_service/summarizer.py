@@ -110,6 +110,34 @@ class DashScopeProvider:
             logger.error("DashScope timeout (%s): type=%s, url=%s", self.timeout, type(e).__name__, self.api_base)
             raise
         except httpx.HTTPStatusError as e:
+            # Handle 403 forbidden (expired key) and 429 rate limit
+            if e.response.status_code == 429:
+                wait_time = 15
+                logger.warning("DashScope rate limit hit, waiting %ds before retry...", wait_time)
+                await asyncio.sleep(wait_time)
+                try:
+                    async with httpx.AsyncClient(timeout=self.timeout) as client:
+                        resp = await client.post(
+                            f"{self.api_base}/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {self.api_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "model": self.model,
+                                "messages": messages,
+                                "temperature": 0.7,
+                                "max_tokens": 2000,
+                                **({"enable_thinking": False} if "14b" in self.model and "qwen3" in self.model else {}),
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        text = data["choices"][0]["message"]["content"]
+                        return text
+                except Exception as retry_e:
+                    logger.error("DashScope retry after 429 also failed: %s", retry_e)
+                    raise
             logger.error("DashScope HTTP error: %d %s — body: %s", e.response.status_code, e.response.reason_phrase, e.response.text[:300])
             raise
         except Exception as e:
@@ -227,6 +255,35 @@ class OpenRouterProvider:
             logger.error("OpenRouter timeout (%s): type=%s, url=%s", self.timeout, type(e).__name__, self.api_base)
             raise
         except httpx.HTTPStatusError as e:
+            # Handle 429 rate limit with longer wait and retry once
+            if e.response.status_code == 429:
+                wait_time = 15
+                logger.warning("OpenRouter rate limit hit, waiting %ds before retry...", wait_time)
+                await asyncio.sleep(wait_time)
+                # Retry the request once
+                try:
+                    async with httpx.AsyncClient(timeout=self.timeout) as client:
+                        resp = await client.post(
+                            f"{self.api_base}/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {self.api_key}",
+                                "Content-Type": "application/json",
+                                "Referer": "https://github.com/crypto-news-bot",
+                            },
+                            json={
+                                "model": self.model,
+                                "messages": messages,
+                                "temperature": 0.7,
+                                "max_tokens": 2000,
+                            },
+                        )
+                        resp.raise_for_status()
+                        data = resp.json()
+                        text = data["choices"][0]["message"]["content"]
+                        return text
+                except Exception as retry_e:
+                    logger.error("OpenRouter retry after 429 also failed: %s", retry_e)
+                    raise
             logger.error("OpenRouter HTTP error: %d %s — body: %s", e.response.status_code, e.response.reason_phrase, e.response.text[:300])
             raise
         except Exception as e:

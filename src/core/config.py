@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     ai_rotate_every: int = Field(5, description="Rotate AI model every N processed items (0 = no rotation)")
     dashscope_api_key: str = Field("", description="DashScope API key")
     dashscope_api_base: str = Field(
-        "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        description="DashScope API base URL",
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        description="DashScope API base URL (international endpoint)",
     )
 
     # OpenRouter
