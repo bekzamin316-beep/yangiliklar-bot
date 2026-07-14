@@ -54,6 +54,7 @@ def create_scheduler(publisher: Publisher) -> AsyncIOScheduler:
         trigger=CronTrigger(
             hour=settings.digest_hour,
             minute=settings.digest_minute,
+            timezone=settings.digest_timezone,
         ),
         args=[publisher],
         id="daily_digest",
