@@ -4,8 +4,8 @@ import logging
 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from src.core.config import settings
-from src.ai_service.summarizer import DashScopeProvider, OpenRouterProvider
+from src.ai_service.prompt_loader import load_prompt
+from src.ai_service.summarizer import DashScopeProvider
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +29,7 @@ class TranslationService:
         if not text.strip():
             return text
 
-        prompt = (
-            f"Quyidagi matnni o'zbek tiliga tarjima qiling. "
-            f"Matn rus, ingliz yoki boshqa tillarda bo'lishi mumkin. "
-            f"Tarjima faqat o'zbek tilida (Lotin alifbosi) bo'lishi kerak. "
-            f"Asl matnni qaytarib bermang, faqat tarjima natijasini yozing:\n\n{text}"
-        )
+        prompt = load_prompt("translate").format(text=text)
         try:
             translated = await self.provider.generate(
                 prompt,

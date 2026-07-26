@@ -1,6 +1,7 @@
 """News Processor — bridges collector → AI → DB → Publisher."""
 
 import logging
+import re
 
 from src.core.config import settings
 from src.core.database import get_session
@@ -10,7 +11,6 @@ from src.ai_service.models import NewsAnalysis
 from src.news_collector.models import RawNewsItem
 
 logger = logging.getLogger(__name__)
-
 
 class NewsProcessor:
     """Process raw news: deduplicate, analyze with AI, save to DB."""
@@ -35,8 +35,6 @@ class NewsProcessor:
         for item in items:
             try:
                 # Check duplicate
-                async with get_session() as session:
-                    repo = NewsRepository(session)
                 existing = await self._get_by_hash(item.content_hash())
                 if existing:
                     logger.debug("Skipping duplicate: %s", item.title[:50])
@@ -73,13 +71,10 @@ class NewsProcessor:
             return await repo.get_by_hash(content_hash)
 
     async def _save_news(self, item: RawNewsItem, analysis: NewsAnalysis) -> object:
-        # Translate title to Uzbek so posts display Uzbek headline
-        title_uz = item.title
-        if self.ai.translator:
-            try:
-                title_uz = await self.ai.translator.translate_to_uzbek(item.title)
-            except Exception as e:
-                logger.warning("Title translation failed, using original: %s", e)
+        # Use AI-translated title if available; otherwise keep original
+        title_uz = analysis.title_uz.strip() if analysis.title_uz else item.title
+        if not title_uz:
+            title_uz = item.title
 
         async with get_session() as session:
             repo = NewsRepository(session)
@@ -105,44 +100,80 @@ class NewsProcessor:
             "bullish": "🟢",
             "bearish": "🔴",
             "neutral": "⚪",
-        }.get(news.sentiment, "⚪")
+        }.get(getattr(news, "sentiment", "neutral"), "⚪")
 
-        title = news.title
-        summary = news.summary or ""
-        analysis = news.analysis or ""
-        source = news.source_name or ""
-        url = news.source_url or ""
+        title = (getattr(news, "title", "") or "").strip()
+        summary = (getattr(news, "summary", "") or "").strip()
+        analysis = (getattr(news, "analysis", "") or "").strip()
+        source = (getattr(news, "source_name", "") or "").strip()
+        url = (getattr(news, "source_url", "") or "").strip()
 
-        lines = [
-            f"{sentiment_emoji} <b>{title}</b>",
-            "",
-            summary,
-        ]
+        # Fallbacks so we never publish empty sections
+        if not title:
+            title = "Yangilik"
+        if not summary:
+            summary = title
+
+        lines: list[str] = []
+        lines.append(f"{sentiment_emoji} <b>{title}</b>")
+        lines.append("")
+        lines.append(summary)
 
         if analysis:
-            lines.extend(["", f"📋 {analysis}"])
+            lines.append("")
+            lines.append(f"📋 Batafsil tahlil")
+            lines.append("")
+            lines.append(analysis)
 
         if url:
-            lines.extend(["", f"🔗 <a href='{url}'>Manba</a>"])
+            lines.append("")
+            lines.append("🔗 Manba")
+            lines.append("")
+            lines.append(url)
 
         if source:
-            lines.append(f"\n📰 {source}")
+            lines.append("")
+            lines.append(f"📰 {source}")
 
-        # Hashtags — fixed crypto tags + dynamic AI tags
-        hashtags = ["#kripto", "#kriptovalyuta", "#bitcoin"]
-        if news.tags:
-            for tag in news.tags.split(","):
-                tag = tag.strip().replace(" ", "").lower()
-                if tag and tag not in hashtags:
-                    hashtags.append(f"#{tag}")
-        if news.sentiment == "bullish":
-            hashtags.append("#bullish")
-        elif news.sentiment == "bearish":
-            hashtags.append("#bearish")
-        lines.append(f"\n{' '.join(hashtags)}")
-
-        # Signature footer on every post
-        if settings.telegram_channel_username:
-            lines.append(f"\n━━━━━━━━━━━━━━━━━━━━━━\n📢 https://t.me/{settings.telegram_channel_username}")
+        # Hashtags — deduplicated, max 5, case-insensitive, order preserved
+        hashtags = NewsProcessor._build_hashtags(news)
+        if hashtags:
+            lines.append("")
+            lines.append(" ".join(hashtags))
 
         return "\n".join(lines)
+
+    @staticmethod
+    def _build_hashtags(news: object) -> list[str]:
+        """Build a deduplicated list of at most 5 hashtags for the post."""
+        seen: set[str] = set()
+        hashtags: list[str] = []
+
+        def add_tag(tag: str) -> None:
+            if not tag:
+                return
+            normalized = tag.lower().replace(" ", "").replace("-", "").lstrip("#")
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                hashtags.append(f"#{normalized}")
+
+        # Dynamic AI tags first
+        tags_attr = getattr(news, "tags", "") or ""
+        for tag in tags_attr.split(","):
+            add_tag(tag.strip())
+
+        # Sentiment tags
+        sentiment = getattr(news, "sentiment", "neutral") or "neutral"
+        if sentiment == "bullish":
+            add_tag("bullish")
+        elif sentiment == "bearish":
+            add_tag("bearish")
+
+        # Default crypto tags (only if not already present)
+        for default_tag in ["kripto", "kriptovalyuta", "bitcoin"]:
+            add_tag(default_tag)
+
+        # Always include #crypto for broader reach if room
+        add_tag("crypto")
+
+        return hashtags[:5]

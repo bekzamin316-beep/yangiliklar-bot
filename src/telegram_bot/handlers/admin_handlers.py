@@ -449,7 +449,7 @@ async def cb_admin_ai_prompts(callback: types.CallbackQuery, session) -> None:
     """Show AI prompt information."""
     settings_repo = SettingsRepository(session)
     custom_prompt = await settings_repo.get_value("ai_analysis_prompt")
-    from src.ai_service.summarizer import get_analysis_prompt
+    from src.ai_service.prompt_loader import get_analysis_prompt
     current_prompt = get_analysis_prompt()
 
     text = (
@@ -468,7 +468,7 @@ async def cb_admin_ai_prompts(callback: types.CallbackQuery, session) -> None:
 @admin_router.callback_query(F.data == "admin_ai_prompt_edit")
 async def cb_admin_ai_prompt_edit(callback: types.CallbackQuery, state: FSMContext) -> None:
     """Prompt admin to enter a new AI analysis prompt."""
-    from src.ai_service.summarizer import get_analysis_prompt
+    from src.ai_service.prompt_loader import get_analysis_prompt
     current = get_analysis_prompt()
 
     text = (
@@ -503,7 +503,7 @@ async def process_prompt_edit(message: types.Message, state: FSMContext, session
     )
 
     # Update runtime variable
-    from src.ai_service.summarizer import set_analysis_prompt
+    from src.ai_service.prompt_loader import set_analysis_prompt
     set_analysis_prompt(new_prompt)
 
     await message.answer(

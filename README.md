@@ -2,6 +2,15 @@
 
 Production-ready Telegram bot for crypto news collection, AI analysis, and publishing.
 
+## Features
+
+- Collects news from multiple RSS sources
+- Analyzes news with AI (DashScope Qwen models)
+- Publishes important news to Telegram channel
+- Daily digest of news
+- Admin panel for configuration
+- Multi-language support
+
 ## Architecture
 
 5 logical modules in one repository:
@@ -38,6 +47,16 @@ python -m src.main
 ```bash
 docker-compose up -d
 ```
+
+## Deployment
+
+### Railway Deployment
+
+See [DEPLOY_RAILWAY.md](DEPLOY_RAILWAY.md) for Railway deployment instructions.
+
+### GitHub Repository
+
+See [GITHUB_SETUP.md](GITHUB_SETUP.md) for GitHub repository setup instructions.
 
 ## Admin Panel
 

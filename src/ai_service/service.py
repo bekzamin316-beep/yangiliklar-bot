@@ -1,6 +1,7 @@
 """High-level AI service with retry, model-level fallback, and rotation."""
 
 import logging
+import time
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -10,6 +11,25 @@ from src.ai_service.summarizer import DashScopeProvider, OpenRouterProvider
 from src.ai_service.translation import TranslationService
 
 logger = logging.getLogger(__name__)
+
+
+def _needs_translation(text: str | None) -> bool:
+    """Return True if text looks like English and should be translated.
+
+    The AI prompts already request Uzbek output, but occasionally Latin-script
+    English leaks through. We detect that cheaply by looking for common English
+    stopwords that do not appear in Uzbek text, avoiding unnecessary API calls.
+    """
+    if not text:
+        return False
+    lowered = text.lower()
+    english_markers = {
+        "the", "and", "of", "to", "in", "is", "for", "that", "with", "on",
+        "as", "by", "at", "from", "are", "was", "were", "have", "has", "had",
+        "will", "would", "could", "should", "this", "these", "those", "an", "a",
+        "about", "after", "before", "between", "during", "into", "over", "under",
+    }
+    return any(marker in lowered.split() for marker in english_markers)
 
 
 class AIService:
@@ -52,7 +72,6 @@ class AIService:
         """Return models to try as fallback, excluding the failed one and quota-exhausted ones."""
         candidates = [m for m in self._models if m != failed_model]
         # Also skip models that recently hit quota limits (within last 30 minutes)
-        import time
         now = int(time.monotonic())
         recent_exhausted = [m for m, ts in self._quota_exhausted.items() if now - ts < 1800]
         if recent_exhausted:
@@ -62,7 +81,6 @@ class AIService:
 
     def _mark_quota_exhausted(self, model: str) -> None:
         """Mark a model as quota-exhausted so we skip it for 30 minutes."""
-        import time
         self._quota_exhausted[model] = int(time.monotonic())
         logger.warning("Model %s marked as quota-exhausted, skipping for 30 minutes", model)
 
@@ -82,11 +100,8 @@ class AIService:
             self.primary.model = model
             analysis = await self.primary.analyze_news(title, content)
 
-            # Translate if enabled
-            if self.translator and analysis.summary_uz:
-                analysis.summary_uz = await self.translator.translate_to_uzbek(analysis.summary_uz)
-                analysis.analysis_uz = await self.translator.translate_to_uzbek(analysis.analysis_uz)
-
+            # Post-process: translate any leaked non-Uzbek text and ensure title is set
+            analysis = await self._post_process_analysis(analysis, title)
             return analysis
         except Exception as e:
             err_str = str(e)
@@ -95,6 +110,40 @@ class AIService:
                 self._mark_quota_exhausted(model)
             logger.warning("Model %s failed: %s", model, err_str[:100])
             return None
+
+    async def _post_process_analysis(self, analysis: NewsAnalysis, original_title: str) -> NewsAnalysis:
+        """Ensure analysis output is clean: translated to Uzbek and title set."""
+        # AI prompt already requires Uzbek output. Only translate if the model
+        # leaked Latin-script text, to avoid wasting tokens/API calls.
+        if self.translator:
+            if analysis.summary_uz and _needs_translation(analysis.summary_uz):
+                analysis.summary_uz = await self.translator.translate_to_uzbek(analysis.summary_uz)
+            if analysis.analysis_uz and _needs_translation(analysis.analysis_uz):
+                analysis.analysis_uz = await self.translator.translate_to_uzbek(analysis.analysis_uz)
+
+        # Fallback title if AI didn't provide one
+        if not analysis.title_uz.strip() and original_title:
+            if self.translator:
+                try:
+                    analysis.title_uz = await self.translator.translate_to_uzbek(original_title)
+                except Exception as e:
+                    logger.warning("Title translation failed: %s", e)
+            if not analysis.title_uz.strip():
+                analysis.title_uz = original_title
+
+        # Fallback summary if empty
+        if not analysis.summary_uz.strip():
+            analysis.summary_uz = analysis.title_uz or original_title
+
+        # Fallback analysis if empty
+        if not analysis.analysis_uz.strip():
+            analysis.analysis_uz = "Yangilik tavsifi mavjud emas."
+
+        # Validate sentiment
+        if analysis.sentiment not in {"bullish", "bearish", "neutral"}:
+            analysis.sentiment = "neutral"
+
+        return analysis
 
     @retry(
         stop=stop_after_attempt(2),
@@ -136,11 +185,7 @@ class AIService:
             try:
                 logger.info("Trying backup AI provider...")
                 analysis = await self.backup.analyze_news(title, content)
-
-                if self.translator and analysis.summary_uz:
-                    analysis.summary_uz = await self.translator.translate_to_uzbek(analysis.summary_uz)
-                    analysis.analysis_uz = await self.translator.translate_to_uzbek(analysis.analysis_uz)
-
+                analysis = await self._post_process_analysis(analysis, title)
                 self._advance_rotation()
                 return analysis
             except Exception as e2:
@@ -149,20 +194,23 @@ class AIService:
         # Step 4: Minimal analysis with translation fallback
         self._advance_rotation()
         logger.warning("All models failed for: %s — returning minimal analysis", title[:50])
-        fallback_summary = title[:200]
+        fallback_title = title
+        fallback_summary = title
         if self.translator:
             try:
-                fallback_summary = await self.translator.translate_to_uzbek(fallback_summary)
+                fallback_title = await self.translator.translate_to_uzbek(title)
+                fallback_summary = fallback_title
             except Exception as te:
                 logger.error("Fallback translation also failed: %s", te)
         return NewsAnalysis(
+            title_uz=fallback_title,
             summary_uz=fallback_summary,
             analysis_uz="Yangilik tavsifi mavjud emas.",
             importance_score=50,
             sentiment="neutral",
         )
 
-    async def create_digest(self, news_items: list[dict]) -> dict:
+    async def create_digest(self, news_items: list[dict]) -> list[dict]:
         """Generate a daily digest with model-level fallback."""
         # Try each model for digest
         model = self._get_current_model()
@@ -171,14 +219,15 @@ class AIService:
         for try_model in [model] + fallback_models:
             try:
                 self.primary.model = try_model
-                digest = await self.primary.generate_digest(news_items)
+                digest_items = await self.primary.generate_digest(news_items)
 
                 if self.translator:
-                    for key in ["summary", "most_bullish", "most_bearish"]:
-                        if digest.get(key):
-                            digest[key] = await self.translator.translate_to_uzbek(digest[key])
+                    for item in digest_items:
+                        text = item.get("text") or ""
+                        if text and _needs_translation(text):
+                            item["text"] = await self.translator.translate_to_uzbek(text)
 
-                return digest
+                return digest_items
             except Exception as e:
                 err_str = str(e)
                 if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
@@ -188,17 +237,14 @@ class AIService:
         # Backup provider
         if self.backup:
             try:
-                digest = await self.backup.generate_digest(news_items)
+                digest_items = await self.backup.generate_digest(news_items)
                 if self.translator:
-                    for key in ["summary", "most_bullish", "most_bearish"]:
-                        if digest.get(key):
-                            digest[key] = await self.translator.translate_to_uzbek(digest[key])
-                return digest
+                    for item in digest_items:
+                        text = item.get("text") or ""
+                        if text and _needs_translation(text):
+                            item["text"] = await self.translator.translate_to_uzbek(text)
+                return digest_items
             except Exception as e2:
                 logger.error("Backup digest also failed: %s", e2)
 
-        return {
-            "summary": "Bugun kriptovalyuta bozorida turli xil yangiliklar bo'ldi.",
-            "most_bullish": "",
-            "most_bearish": "",
-        }
+        return []

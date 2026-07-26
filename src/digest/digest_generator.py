@@ -12,34 +12,6 @@ from src.digest.content_fetcher import ContentFetcher
 
 logger = logging.getLogger(__name__)
 
-DIGEST_GENERATE_PROMPT = """Siz kunlik kripto yangiliklar digest muallifidir. Quyidagi yangiliklar asosida concise digest tayyorlang.
-
-QOIDALAR:
-1. Har bir yangilik FAQAT 1–3 qisqa gapda (o'zbek tilida, Lotin alifbosi) yozing
-2. Bir xil voqeaga oid yangiliklar BIRLASHIRING (merge) — bir nechta yangilik bir voqea haqida bo'lsa, faqat bitta item yarating
-3. Dublikatlarni OLIB TASHLANG
-4. Muhimlik (importance) bo'yicha SORT qiling — eng muhimlar birinchi
-5. SHAXSIY fikr, bashorat, yozmang — FAQAT faktlar
-6. Har bir item keyin original source link ko'rsating
-7. Sentiment emoji qo'shing: 🟢 ijobiy, 🔴 salbiy, ⚪️ neytral
-
-QUYIDAGI YANGILIKLAR (original content + source links):
-
-{items_text}
-
-Quyidagi JSON formatida FAQAT javob qaytaring (markdown yo'q, tushuntirish yo'q):
-{{
-  "items": [
-    {{
-      "text": "1–3 qisqa gap, FAQAT o'zbek tilida Lotin alifbosi",
-      "sentiment": "bullish/bearish/neutral",
-      "source_link": "original URL",
-      "importance": 80
-    }}
-  ]
-}}
-"""
-
 
 class DigestGenerator:
     """Generates a concise daily digest from original source content."""
@@ -61,9 +33,27 @@ class DigestGenerator:
         if not news_items:
             return []
 
-        # Build items text for AI prompt
-        items_for_ai = []
+        # Build items for AI prompt
+        items_for_ai = self._build_items_for_ai(news_items, source_contents)
+        if not items_for_ai:
+            return []
+
+        try:
+            # Use provider digest method (prompt loaded from file)
+            ai_response = await self.ai_service.primary.generate_digest(items_for_ai)
+            digest_items = self._normalize_items(ai_response)
+            # Sort by importance descending
+            digest_items.sort(key=lambda x: x.get("importance", 50), reverse=True)
+            return digest_items
+        except Exception as e:
+            logger.error("AI digest generation failed: %s", e)
+            return self._fallback_digest(items_for_ai)
+
+    def _build_items_for_ai(self, news_items: list, source_contents: dict[int, str] | None) -> list[dict]:
+        """Build normalized list of items for the digest AI prompt."""
+        items = []
         for item in news_items:
+            item_id = getattr(item, "id", None)
             title = getattr(item, "title", "") or ""
             summary = getattr(item, "analysis", "") or getattr(item, "summary", "") or ""
             sentiment = getattr(item, "sentiment", "neutral") or "neutral"
@@ -72,110 +62,64 @@ class DigestGenerator:
 
             # Use fetched original content if available, otherwise DB summary
             original = ""
-            if source_contents and item.id in source_contents:
-                original = source_contents[item.id][:1000]
+            if source_contents and item_id is not None and item_id in source_contents:
+                original = source_contents[item_id][:1000]
             elif summary:
                 original = summary[:500]
 
-            items_for_ai.append({
+            if not title.strip() and not original.strip():
+                continue
+
+            items.append({
                 "title": title,
                 "content": original,
                 "sentiment": sentiment,
                 "importance": importance,
                 "source_url": source_url,
             })
+        return items
 
-        items_text = self._format_items_for_prompt(items_for_ai)
-
-        try:
-            prompt = DIGEST_GENERATE_PROMPT.format(items_text=items_text)
-            ai_response = await self.ai_service.primary.generate(
-                prompt,
-                system="Siz kunlik kripto yangiliklar digest muallifidir. Barcha javoblar FAQAT o'zbek tilida (Lotin alifbosi) bo'lishi shart. FAQAT JSON formatida javob qaytaring.",
-            )
-            return self._parse_ai_response(ai_response)
-
-        except Exception as e:
-            logger.error("AI digest generation failed: %s", e)
-            # Fallback: simple list without AI processing
-            return self._fallback_digest(items_for_ai)
-
-    def _format_items_for_prompt(self, items: list[dict]) -> str:
-        """Format news items as text for the AI prompt."""
-        lines = []
-        for i, item in enumerate(items):
-            sentiment_str = item.get("sentiment", "neutral")
-            importance_str = item.get("importance", 50)
-            source = item.get("source_url", "")
-            content = item.get("content", "")
-            title = item.get("title", "")
-
-            block = f"[{i+1}] "
-            if sentiment_str:
-                block += f"Sentiment: {sentiment_str}. "
-            if importance_str:
-                block += f"Importance: {importance_str}. "
-            block += f"\nSarlavha: {title}"
-            if content:
-                block += f"\nOriginal content: {content}"
-            if source:
-                block += f"\nSource link: {source}"
-            lines.append(block)
-
-        return "\n\n".join(lines)
-
-    def _parse_ai_response(self, text: str) -> list[dict]:
-        """Parse AI JSON response into digest items."""
-        try:
-            # Extract JSON from response
-            text = text.strip()
-            if text.startswith("```"):
-                lines = text.split("\n")
-                lines = lines[1:-1]
-                text = "\n".join(lines)
-
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start == -1 or end == 0:
-                raise ValueError("No JSON found")
-
-            data = json.loads(text[start:end])
-            items = data.get("items", [])
-
-            # Validate and normalize each item
-            result = []
-            for item in items:
-                result.append({
-                    "text": item.get("text", ""),
-                    "sentiment": item.get("sentiment", "neutral"),
-                    "source_link": item.get("source_link", ""),
-                    "importance": int(item.get("importance", 50)),
-                })
-
-            # Sort by importance descending
-            result.sort(key=lambda x: x["importance"], reverse=True)
-            return result
-
-        except Exception as e:
-            logger.error("Failed to parse digest AI response: %s | text: %s", e, text[:300])
-            return []
+    def _normalize_items(self, items: list[dict]) -> list[dict]:
+        """Validate and normalize digest items from AI response."""
+        result = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "") or "").strip()
+            if not text:
+                continue
+            sentiment = str(item.get("sentiment", "neutral") or "neutral").lower().strip()
+            if sentiment not in {"bullish", "bearish", "neutral"}:
+                sentiment = "neutral"
+            try:
+                importance = int(item.get("importance", 50) or 50)
+            except (TypeError, ValueError):
+                importance = 50
+            result.append({
+                "text": text,
+                "sentiment": sentiment,
+                "source_link": str(item.get("source_link", "") or "").strip(),
+                "importance": max(0, min(100, importance)),
+            })
+        return result
 
     def _fallback_digest(self, items: list[dict]) -> list[dict]:
-        """Simple fallback when AI fails — just deduplicate titles and sort by importance."""
+        """Simple fallback when AI fails — deduplicate titles and sort by importance."""
         seen_titles = set()
         result = []
         for item in items:
-            title_lower = item.get("title", "").lower()[:50]
-            if title_lower in seen_titles:
+            title = str(item.get("title", "") or "").strip()
+            title_lower = title.lower()[:50]
+            if not title or title_lower in seen_titles:
                 continue
             seen_titles.add(title_lower)
             result.append({
-                "text": item.get("title", ""),
-                "sentiment": item.get("sentiment", "neutral"),
-                "source_link": item.get("source_url", ""),
-                "importance": item.get("importance", 50),
+                "text": title,
+                "sentiment": str(item.get("sentiment", "neutral") or "neutral").lower().strip(),
+                "source_link": str(item.get("source_url", "") or "").strip(),
+                "importance": item.get("importance", 50) or 50,
             })
-        result.sort(key=lambda x: x["importance"], reverse=True)
+        result.sort(key=lambda x: x.get("importance", 50), reverse=True)
         return result
 
     async def close(self) -> None:

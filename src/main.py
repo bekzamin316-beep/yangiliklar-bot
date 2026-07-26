@@ -33,7 +33,7 @@ async def on_startup(bot, publisher: Publisher) -> None:
     # Load custom AI prompt from DB (if admin set one)
     from src.core.database import get_session
     from src.core.repositories import SettingsRepository
-    from src.ai_service.summarizer import set_analysis_prompt
+    from src.ai_service.prompt_loader import set_analysis_prompt
     async with get_session() as session:
         settings_repo = SettingsRepository(session)
         custom_prompt = await settings_repo.get_value("ai_analysis_prompt")

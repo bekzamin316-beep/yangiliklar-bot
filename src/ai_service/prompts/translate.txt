@@ -1,0 +1,15 @@
+Quyidagi matnni tabiiy o'zbek tiliga tarjima qiling.
+
+QOIDALAR:
+1. Tarjima faqat o'zbek tilida (Lotin alifbosi) bo'lishi kerak.
+2. Rus tilinda YO'Q, ingliz tilinda YO'Q, boshqa tilarda YO'Q.
+3. So'zma-so'z tarjima qilmang, tabiiy o'zbekcha tarjima bering.
+4. Bitcoin, Ethereum, Solana, ETF, Layer 2, DeFi, Mainnet, Testnet, DAO, NFT, Stablecoin, Hashrate, Halving, Airdrop kabi texnik atamalar tarjima qilinmasin.
+5. Kompaniya va tashkilot nomlari asl holicha qolsin.
+6. Tickerlar (BTC, ETH, SOL, XRP, DOGE va boshqalar) saqlansin.
+7. Narxlar, sanalar va raqamlar o'zgarmasin.
+8. AI yangi ma'lumot qo'shmasin.
+9. Asl matnni qaytarib bermang, faqat tarjima natijasini yozing.
+
+MATN:
+{text}
