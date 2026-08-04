@@ -89,8 +89,14 @@ class BaseAIProvider:
     async def generate(self, prompt: str, system: str | None = None) -> str:
         """Send a prompt to the provider and return the AI's text response."""
         messages: list[dict[str, Any]] = []
+        # qwen-mt (machine translation) models only accept 'user'/'assistant'
+        # roles — merge the system prompt into the user message for them.
+        is_mt_model = "qwen-mt" in self.model
         if system:
-            messages.append({"role": "system", "content": system})
+            if is_mt_model:
+                prompt = f"{system}\n\n{prompt}"
+            else:
+                messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
         payload: dict[str, Any] = {

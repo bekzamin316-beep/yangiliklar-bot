@@ -16,7 +16,7 @@ class TranslationService:
     def __init__(self):
         # Always use DashScope for translation (no rate limits, works reliably)
         self.provider = DashScopeProvider()
-        self.provider.model = "qwen-turbo"  # Fast + cheap model for translation
+        self.provider.model = "qwen-mt-plus"  # Dedicated machine-translation model for Uzbek
 
     @retry(
         stop=stop_after_attempt(3),
