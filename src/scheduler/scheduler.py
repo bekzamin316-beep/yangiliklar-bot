@@ -1,39 +1,95 @@
 """Scheduler setup — APScheduler with news collection, live prices, and digest jobs."""
 
 import logging
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.core.config import settings
-from src.scheduler.jobs import collect_and_publish_news, generate_daily_digest, update_live_prices
+from src.scheduler.jobs import collect_news, generate_telegraph_digest, update_live_prices
 from src.telegram_bot.publisher import Publisher
 
 logger = logging.getLogger(__name__)
+
+# Module-level reference so admin panel changes can reschedule the digest job.
+_scheduler: AsyncIOScheduler | None = None
+
+DIGEST_JOB_ID = "telegraph_digest"
+_DEFAULT_TIMES = ["08:00", "12:00", "18:00", "22:00"]
+
+
+def _parse_times(schedule_times: list[str]) -> set[tuple[int, int]]:
+    """Parse schedule times into a set of (hour, minute) pairs."""
+    pairs: set[tuple[int, int]] = set()
+    for t in schedule_times:
+        parts = t.split(":")
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            h, m = int(parts[0]), int(parts[1])
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                pairs.add((h, m))
+    return pairs
+
+
+def _build_digest_trigger(hour: int, minute: int) -> CronTrigger:
+    """Build a CronTrigger for one exact digest time."""
+    return CronTrigger(
+        hour=str(hour),
+        minute=str(minute),
+        timezone=settings.digest_timezone,
+    )
+
+
+def _configure_digest_jobs(scheduler: AsyncIOScheduler, publisher: Publisher, schedule_times: list[str]) -> None:
+    """Remove any existing digest jobs and add one cron job per exact time.
+
+    One job per HH:MM avoids the cartesian-product bug that a single cron
+    trigger with multiple hours/minutes would introduce for mixed times.
+    """
+    for job in scheduler.get_jobs():
+        if job.id.startswith(f"{DIGEST_JOB_ID}_"):
+            scheduler.remove_job(job.id)
+
+    pairs = sorted(_parse_times(schedule_times))
+    if not pairs:
+        pairs = sorted(_parse_times(_DEFAULT_TIMES))
+
+    for hour, minute in pairs:
+        job_id = f"{DIGEST_JOB_ID}_{hour:02d}:{minute:02d}"
+        scheduler.add_job(
+            generate_telegraph_digest,
+            trigger=_build_digest_trigger(hour, minute),
+            args=[publisher],
+            id=job_id,
+            name=f"Generate Telegraph digest {hour:02d}:{minute:02d}",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
 
 
 def create_scheduler(publisher: Publisher) -> AsyncIOScheduler:
     """Create and configure the APScheduler instance.
 
     Jobs:
-    1. collect_and_publish_news — every NEWS_CHECK_INTERVAL seconds
+    1. collect_news — every NEWS_CHECK_INTERVAL seconds (24/7, no publishing)
     2. update_live_prices — every LIVE_PRICE_INTERVAL seconds (default 60s)
-    3. generate_daily_digest — daily at DIGEST_HOUR:DIGEST_MINUTE
+    3. generate_telegraph_digest — at each digest schedule time (default 08:00, 12:00, 18:00, 22:00)
     """
+    global _scheduler
+
     scheduler = AsyncIOScheduler(timezone=settings.digest_timezone)
 
-    # Job 1: Collect and publish news periodically
+    # Job 1: Collect news periodically (saved to DB, picked up by digests)
     scheduler.add_job(
-        collect_and_publish_news,
+        collect_news,
         trigger=IntervalTrigger(seconds=settings.news_check_interval),
-        args=[publisher],
         id="collect_news",
-        name="Collect and publish news",
+        name="Collect news (24/7)",
         replace_existing=True,
         max_instances=1,
+        coalesce=True,
         next_run_time=datetime.now(),
     )
 
@@ -48,28 +104,55 @@ def create_scheduler(publisher: Publisher) -> AsyncIOScheduler:
         max_instances=1,
     )
 
-    # Job 3: Generate daily digest
-    scheduler.add_job(
-        generate_daily_digest,
-        trigger=CronTrigger(
-            hour=settings.digest_hour,
-            minute=settings.digest_minute,
-            timezone=settings.digest_timezone,
-        ),
-        args=[publisher],
-        id="daily_digest",
-        name="Generate daily digest",
-        replace_existing=True,
-        max_instances=1,
-    )
+    # Job 3: Generate Telegraph digest at each scheduled time
+    try:
+        schedule_times = list(getattr(settings, "digest_schedule_list", _DEFAULT_TIMES))
+    except Exception:
+        schedule_times = list(_DEFAULT_TIMES)
+    _configure_digest_jobs(scheduler, publisher, schedule_times)
+
+    _scheduler = scheduler
 
     logger.info(
-        "Scheduler configured: news every %ds, live prices every %ds, digest at %02d:%02d %s",
+        "Scheduler configured: news every %ds, live prices every %ds, digest at %s (%s)",
         settings.news_check_interval,
         live_price_interval,
-        settings.digest_hour,
-        settings.digest_minute,
+        ", ".join(schedule_times),
         settings.digest_timezone,
     )
 
     return scheduler
+
+
+async def reschedule_digest_jobs() -> list[str] | None:
+    """Re-read digest schedule times from DB and reschedule the digest jobs.
+
+    Called from the admin panel after the schedule is changed, so changes take
+    effect immediately without a bot restart. Returns the new schedule list,
+    or None if there is no running scheduler / no stored schedule.
+    """
+    global _scheduler
+    try:
+        from src.digest.schedule import get_schedule_times
+        times = await get_schedule_times()
+    except Exception as e:
+        logger.error("Failed to load schedule for rescheduling: %s", e)
+        return None
+
+    if _scheduler is None:
+        logger.warning("Scheduler not running — schedule saved, applied on next start")
+        return times
+
+    try:
+        # Reuse the publisher bound to an existing digest job
+        publisher = None
+        for job in _scheduler.get_jobs():
+            if job.id.startswith(f"{DIGEST_JOB_ID}_") and job.args:
+                publisher = job.args[0]
+                break
+        _configure_digest_jobs(_scheduler, publisher, times)
+        logger.info("Digest jobs rescheduled to: %s", ", ".join(times))
+        return times
+    except Exception as e:
+        logger.error("Failed to reschedule digest jobs: %s", e)
+        return times

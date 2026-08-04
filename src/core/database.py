@@ -58,6 +58,34 @@ async def init_db() -> None:
                 except Exception:
                     pass
 
+        # Lightweight migrations for both sqlite and postgres (additive columns only)
+        column_migrations = [
+            (
+                "daily_digests",
+                "telegraph_url",
+                "ALTER TABLE daily_digests ADD COLUMN telegraph_url TEXT",
+            ),
+        ]
+        for table, column, ddl in column_migrations:
+            try:
+                if settings.is_postgres:
+                    exists = await conn.execute(
+                        text(
+                            "SELECT 1 FROM information_schema.columns "
+                            "WHERE table_name=:t AND column_name=:c"
+                        ),
+                        {"t": table, "c": column},
+                    )
+                    if not exists.scalar():
+                        await conn.execute(text(ddl))
+                else:
+                    cols = await conn.execute(text(f"PRAGMA table_info({table})"))
+                    names = {row[1] for row in cols.fetchall()}
+                    if column not in names:
+                        await conn.execute(text(ddl))
+            except Exception:
+                pass
+
 
 async def close_db() -> None:
     """Dispose of the engine connection pool."""

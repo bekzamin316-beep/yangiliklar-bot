@@ -22,6 +22,7 @@ class DailyDigest(Base, TimestampMixin):
     most_bearish: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_published: Mapped[bool] = mapped_column(default=False, nullable=False)
     channel_message_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    telegraph_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     def __repr__(self) -> str:
         return f"<DailyDigest date={self.digest_date} count={self.news_count}>"

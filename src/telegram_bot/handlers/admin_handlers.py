@@ -51,6 +51,17 @@ def _is_authenticated(user_id: int) -> bool:
     return user_id in _authenticated_admins
 
 
+async def _telegraph_ready() -> bool:
+    """Check whether a Telegraph access token is already stored."""
+    from src.digest.schedule import KEY_TELEGRAPH_TOKEN
+    try:
+        async with get_session() as session:
+            repo = SettingsRepository(session)
+            return bool(await repo.get_value(KEY_TELEGRAPH_TOKEN))
+    except Exception:
+        return False
+
+
 async def _require_auth(event: types.Message | types.CallbackQuery, state: FSMContext) -> bool:
     """Gate: if admin is not authenticated, show PIN pad for password.
 
@@ -544,54 +555,60 @@ async def cb_admin_ai_test(callback: types.CallbackQuery) -> None:
 
 @admin_router.callback_query(F.data == "admin_digest")
 async def cb_admin_digest(callback: types.CallbackQuery) -> None:
+    from src.digest import schedule as digest_schedule
+
+    schedule_times = await digest_schedule.get_schedule_times()
+    last_time = await digest_schedule.get_last_digest_time()
+
     text = (
         f"📅 <b>Digest Sozlamalari</b>\n\n"
-        f"🕐 Vaqt: <b>{settings.digest_hour:02d}:{settings.digest_minute:02d}</b>\n"
-        f"🌍 Timezone: <b>{settings.digest_timezone}</b>"
+        f"🕐 Jadvallar: <b>{', '.join(schedule_times)}</b>\n"
+        f"🌍 Timezone: <b>{settings.digest_timezone}</b>\n"
+        f"📤 Oxirgi digest: <b>{last_time.strftime('%d.%m.%Y %H:%M') if last_time else 'hali yuborilmagan'}</b>\n"
+        f"📖 Telegraph: <b>{'✅ Sozlangan' if await _telegraph_ready() else '⏳ Birinchi yuborishda avtomatik yaratiladi'}</b>"
     )
     await callback.message.edit_text(text, reply_markup=get_admin_digest_keyboard().as_markup())
     await callback.answer()
 
 
-@admin_router.callback_query(F.data == "digest_change_time")
-async def cb_digest_change_time(callback: types.CallbackQuery, state: FSMContext) -> None:
-    """Prompt admin to enter new digest time."""
+@admin_router.callback_query(F.data == "digest_schedule_change")
+async def cb_digest_schedule_change(callback: types.CallbackQuery, state: FSMContext) -> None:
+    """Prompt admin to enter new digest schedule times."""
+    from src.digest import schedule as digest_schedule
+
+    current = await digest_schedule.get_schedule_times()
     text = (
-        "🕐 <b>Digest vaqtni o'zgartirish</b>\n\n"
-        f"Joriy: <b>{settings.digest_hour:02d}:{settings.digest_minute:02d}</b>\n\n"
-        "Yangi vaqtni HH:MM formatda yuboring (masalan: <code>20:30</code>)"
+        "🕐 <b>Digest jadvallarini o'zgartirish</b>\n\n"
+        f"Joriy: <b>{', '.join(current)}</b>\n\n"
+        "Yangi vaqtlarni HH:MM formatda, vergul bilan ajratib yuboring (kuniga bir nechta bo'lishi mumkin):\n"
+        "Masalan: <code>08:00,12:00,18:00,22:00</code>\n\n"
+        "⚠️ Jadvallar o'zgarishi bilan botni restart qilish SHART EMAS — darhol kuchga kiradi."
     )
     await callback.message.edit_text(text, reply_markup=get_cancel_keyboard().as_markup())
-    await state.set_state(AdminStates.waiting_for_digest_time)
+    await state.set_state(AdminStates.waiting_for_digest_schedule)
     await callback.answer()
 
 
-@admin_router.message(AdminStates.waiting_for_digest_time)
-async def process_digest_time(message: types.Message, state: FSMContext) -> None:
-    """Save new digest time to .env."""
-    import pathlib
-    text = message.text.strip()
+@admin_router.message(AdminStates.waiting_for_digest_schedule)
+async def process_digest_schedule(message: types.Message, state: FSMContext) -> None:
+    """Save new digest schedule and reschedule the job immediately."""
+    from src.digest import schedule as digest_schedule
+    from src.scheduler.scheduler import reschedule_digest_jobs
+
     try:
-        parts = text.split(":")
-        hour = int(parts[0])
-        minute = int(parts[1])
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            raise ValueError
-    except (ValueError, IndexError):
-        await message.answer("❌ Noto'g'ri format. HH:MM formatda yuboring (masalan: 20:30)")
+        times = await digest_schedule.set_schedule_times(message.text.strip())
+    except ValueError as e:
+        await message.answer(f"❌ {e}\n\nFormat: <code>08:00,12:00,18:00,22:00</code>")
         return
 
-    env_path = pathlib.Path(__file__).parent.parent.parent.parent / ".env"
-    lines = env_path.read_text().splitlines()
-    for i, line in enumerate(lines):
-        if line.startswith("DIGEST_HOUR="):
-            lines[i] = f"DIGEST_HOUR={hour}"
-        elif line.startswith("DIGEST_MINUTE="):
-            lines[i] = f"DIGEST_MINUTE={minute}"
-    env_path.write_text("\n".join(lines) + "\n")
+    applied = await reschedule_digest_jobs()
+    if applied is None:
+        extra = "\n\n⚠️ Jadvallar saqlandi — bot qayta ishga tushganda kuchga kiradi."
+    else:
+        extra = "\n\n✅ Jadvallar darhol yangilandi!"
 
     await message.answer(
-        f"✅ Digest vaqt o'zgartirildi: <b>{hour:02d}:{minute:02d}</b>\n\n⚠️ Botni qayta ishga tushirish kerak!"
+        f"✅ <b>Digest jadvallari o'zgartirildi:</b> {', '.join(times)}{extra}"
     )
     await state.clear()
 
@@ -603,10 +620,10 @@ async def cb_digest_send_now(callback: types.CallbackQuery) -> None:
 
     try:
         from src.telegram_bot.publisher import Publisher
-        from src.scheduler.jobs import generate_daily_digest
+        from src.scheduler.jobs import generate_telegraph_digest
         bot = callback.bot
         publisher = Publisher(bot)
-        await generate_daily_digest(publisher)
+        await generate_telegraph_digest(publisher)
         await callback.message.answer("✅ <b>Digest yuborildi!</b>")
     except Exception as e:
         await callback.message.answer(f"❌ <b>Digest xato:</b> {e}")
@@ -619,15 +636,26 @@ async def cb_admin_digest_test(callback: types.CallbackQuery, state: FSMContext)
     if not await _require_auth(callback, state):
         return
 
-    await callback.answer("📰 Digest test boshlandi...", show_alert=True)
+    await callback.answer("📰 Digest test boshlandi (dry-run, kanalga yuborilmaydi)...", show_alert=True)
 
     try:
         from src.telegram_bot.publisher import Publisher
-        from src.scheduler.jobs import generate_daily_digest
+        from src.scheduler.jobs import generate_telegraph_digest
         bot = callback.bot
         publisher = Publisher(bot)
-        await generate_daily_digest(publisher)
-        await callback.message.answer("✅ <b>Digest test muvaffaqiyatli — yuborildi!</b>")
+        result = await generate_telegraph_digest(publisher, dry_run=True)
+        if result.get("telegraph_url"):
+            await callback.message.answer(
+                f"✅ <b>Digest test muvaffaqiyatli (dry-run)!</b>\n\n"
+                f"📰 Yangiliklar: {result.get('news_count', 0)}\n"
+                f"📖 Sahifa: {result.get('telegraph_url')}\n\n"
+                f"⚠️ Kanalga yuborilmadi — bu faqat sinov edi."
+            )
+        else:
+            info = result.get("error") or "Sahifa yaratilmadi (yangilik yo'q bo'lishi mumkin)"
+            await callback.message.answer(
+                f"ℹ️ Digest test: {result.get('news_count', 0)} yangilik topildi\n{info}"
+            )
     except Exception as e:
         await callback.message.answer(f"❌ <b>Digest test xato:</b> {e}")
         logger.error("Digest test failed: %s", e)

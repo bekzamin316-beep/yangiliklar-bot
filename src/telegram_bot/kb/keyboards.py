@@ -85,9 +85,9 @@ def get_admin_ai_keyboard() -> InlineKeyboardBuilder:
 def get_admin_digest_keyboard() -> InlineKeyboardBuilder:
     """Admin digest settings submenu."""
     kb = InlineKeyboardBuilder()
-    kb.button(text="🕐 Vaqtni o'zgartirish", callback_data="digest_change_time")
+    kb.button(text="🕐 Jadvallarni o'zgartirish", callback_data="digest_schedule_change")
     kb.button(text="📤 Hozir yuborish", callback_data="digest_send_now")
-    kb.button(text="📰 Digest test", callback_data="admin_digest_test")
+    kb.button(text="📰 Digest test (dry-run)", callback_data="admin_digest_test")
     kb.button(text="📋 Oxirgi digestlar", callback_data="digest_history")
     kb.button(text="🔙 Orqaga", callback_data="admin_main")
     kb.adjust(1, 1, 1, 1)

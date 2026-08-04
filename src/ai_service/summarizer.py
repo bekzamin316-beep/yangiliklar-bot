@@ -93,8 +93,14 @@ class BaseAIProvider:
     # ------------------------------------------------------------------
     # Shared HTTP layer
     # ------------------------------------------------------------------
-    async def generate(self, prompt: str, system: str | None = None) -> str:
-        """Send a prompt to the provider and return the AI's text response."""
+    async def generate(self, prompt: str, system: str | None = None, max_tokens: int | None = None) -> str:
+        """Send a prompt to the provider and return the AI's text response.
+
+        Args:
+            prompt: The user prompt.
+            system: Optional system prompt.
+            max_tokens: Override the default token limit (defaults to 1024).
+        """
         messages: list[dict[str, Any]] = []
         # qwen-mt (machine translation) models only accept 'user'/'assistant'
         # roles — merge the system prompt into the user message for them.
@@ -110,7 +116,7 @@ class BaseAIProvider:
             "model": self.model,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1024,
+            "max_tokens": max_tokens or 1024,
             **self._extra_payload(),
         }
 

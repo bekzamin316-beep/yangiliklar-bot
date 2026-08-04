@@ -1,0 +1,17 @@
+Siz kripto bozor tahlilchisisiz. Quyidagi kunlik yangiliklar to'plamini tahlil qilib, ikkita bo'lim tayyorlang: umumiy bozor xulosasi va umumiy AI xulosa. FAQAT JSON qaytaring.
+
+QOIDALAR:
+1. Barcha matn FAQAT o'zbek tilida (Lotin alifbosi) bo'lsin.
+2. Markdown yo'q, kod bloki yo'q, izoh yo'q.
+3. SHAXSIY fikr va investitsiya tavsiyasi YO'Q — neytral, faktlarga asoslangan xulosa.
+4. Bozor xulosasi yangiliklardagi umumiy tendensiyani (optimizm/pessimizm) aks ettirsin, aniq misollar bilan.
+5. Umumiy AI xulosa kunlik rasm: eng muhim voqea, bozor kayfiyati, keyingi e'tibor beriladigan yo'nalishlar.
+
+YANGILIKLAR (sarlavha | sentiment | muhimlik | qisqa xulosa):
+{items}
+
+Quyidagi strukturada FAQAT JSON qaytaring:
+{{
+  "market_summary": "Bozor xulosasi — 4-6 gap, umumiy tendensiya, qaysi soha harakatda",
+  "overall_summary": "Umumiy AI xulosa — 3-5 gap, kunlik bozor rasmi, eng muhim voqea, keyingi e'tibor"
+}}

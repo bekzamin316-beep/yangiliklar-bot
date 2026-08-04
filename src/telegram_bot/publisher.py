@@ -1,5 +1,6 @@
 """Publisher — sends news to Telegram channel."""
 
+import html
 import logging
 
 from aiogram import Bot
@@ -74,6 +75,44 @@ class Publisher:
         except Exception as e:
             logger.error("Failed to publish digest: %s", e)
             return False
+
+    async def publish_digest_message(
+        self,
+        title: str,
+        news_count: int,
+        ai_summary: str,
+        telegraph_url: str,
+    ) -> int | None:
+        """Publish the short digest announcement to the channel.
+
+        Per product requirements the channel only receives: digest title,
+        news count, short AI summary, and the Telegraph page link.
+
+        Returns the Telegram message_id, or None on failure.
+        """
+        lines = [
+            title,
+            "",
+            f"📊 <b>{news_count} ta yangilik</b>",
+            "",
+        ]
+        if ai_summary:
+            lines.append(html.escape(ai_summary))
+            lines.append("")
+        lines.append(f"📖 <a href=\"{telegraph_url}\">To'liq digest — Telegraph'da o'qing</a>")
+
+        try:
+            msg = await self.bot.send_message(
+                chat_id=self.channel_id,
+                text="\n".join(lines),
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+            logger.info("Published digest announcement (msg_id=%d, %d items)", msg.message_id, news_count)
+            return msg.message_id
+        except Exception as e:
+            logger.error("Failed to publish digest announcement: %s", e)
+            return None
 
     async def send_admin_notification(self, text: str) -> None:
         """Send a notification to all admin users.

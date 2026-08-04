@@ -43,13 +43,18 @@ async def on_startup(bot, publisher: Publisher) -> None:
 
     # Notify admins
     me = await bot.get_me()
+    try:
+        from src.digest.schedule import get_schedule_times
+        digest_schedule = ", ".join(await get_schedule_times())
+    except Exception:
+        digest_schedule = ", ".join(settings.digest_schedule_list)
     await publisher.send_admin_notification(
         f"🚀 <b>Bot ishga tushdi!</b>\n\n"
         f"🤖 @{me.username}\n"
         f"📡 AI: {settings.ai_provider} / {settings.ai_model}\n"
         f"🔗 RSS manbalar: {len(settings.rss_source_list)}\n"
         f"⏱ Interval: {settings.news_check_interval}s\n"
-        f"📅 Digest: {settings.digest_hour:02d}:{settings.digest_minute:02d}"
+        f"📅 Digest jadvallari: {digest_schedule} ({settings.digest_timezone})"
     )
     logger.info("Bot started: @%s", me.username)
 

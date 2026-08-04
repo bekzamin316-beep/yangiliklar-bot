@@ -10,6 +10,7 @@ class AdminStates(StatesGroup):
     waiting_for_rss_url = State()
     waiting_for_rss_name = State()
     waiting_for_digest_time = State()
+    waiting_for_digest_schedule = State()
     waiting_for_prompt_edit = State()
     waiting_for_ai_model = State()
     waiting_for_channel_post = State()

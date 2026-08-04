@@ -1,5 +1,6 @@
 """Scheduler jobs — news collection and daily digest."""
 
+import asyncio
 import logging
 from datetime import date, datetime, timezone
 
@@ -17,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 _dedup_cache = DedupCache()
 
+# Serializes all AI-heavy work (collection analysis + digest rewriting) so the
+# 24/7 collection job and a running digest never hit the AI provider queue
+# concurrently (OmniRoute drops requests that wait too long in its queue).
+ai_lock = asyncio.Lock()
+
 
 async def init_dedup_cache() -> None:
     """Load dedup cache from DB on startup."""
@@ -26,9 +32,8 @@ async def init_dedup_cache() -> None:
 async def collect_and_publish_news(publisher: Publisher) -> None:
     """Scheduler job: collect news → analyze → publish each immediately.
 
-    Each news item is analyzed and published right away,
-    so the channel sees news as soon as it's processed — not after
-    waiting for the entire batch to finish.
+    DEPRECATED (kept for backward compatibility): news is now delivered only
+    through the 4x/day digest. Prefer :func:`collect_news`.
     """
     logger.info("=== Starting news collection cycle ===")
 
@@ -86,6 +91,94 @@ async def collect_and_publish_news(publisher: Publisher) -> None:
 
     except Exception as e:
         logger.error("Error in collect_and_publish_news: %s", e, exc_info=True)
+
+
+async def collect_news(_lock_held: bool = False) -> int:
+    """Scheduler job: collect news → analyze → save to DB (no publishing).
+
+    News is collected 24/7 and stored so the next digest can pick it up.
+    Nothing is sent to the channel here — the channel only receives the
+    4x/day digest announcements.
+
+    Args:
+        _lock_held: internal — True when the caller (the digest service) has
+            already acquired :data:`ai_lock`; prevents a self-deadlock.
+
+    Returns the number of newly processed items.
+    """
+    async def _run() -> int:
+        logger.info("=== Starting news collection cycle (digest mode) ===")
+        processed_count = 0
+        try:
+            # 1. Collect raw news from all sources
+            collector = NewsCollector()
+            raw_items = await collector.collect_all()
+
+            if not raw_items:
+                logger.info("No new items collected")
+                return 0
+
+            # 2. Process each item: dedup → AI analysis → save to DB
+            ai_service = AIService()
+            processor = NewsProcessor(ai_service)
+
+            for item in raw_items:
+                try:
+                    # Check duplicate via cache
+                    is_dup = await _dedup_cache.check_or_add(
+                        item.content_hash(), item.url_hash()
+                    )
+                    if is_dup:
+                        logger.debug("Skipping duplicate: %s", item.title[:50])
+                        continue
+
+                    # AI analysis
+                    analysis = await ai_service.analyze_news(item.title, item.content)
+
+                    # Filter by importance
+                    if analysis.importance_score < settings.importance_threshold:
+                        logger.debug(
+                            "Low importance (%d), skipping: %s",
+                            analysis.importance_score, item.title[:50],
+                        )
+                        continue
+
+                    # Save to DB (unpublished — picked up by the next digest)
+                    news = await processor._save_news(item, analysis)
+                    _dedup_cache.add(item.content_hash(), item.url_hash())
+                    processed_count += 1
+                    logger.info(
+                        "Processed: %s | score=%d | %s",
+                        item.title[:50], analysis.importance_score, analysis.sentiment,
+                    )
+
+                except Exception as e:
+                    logger.error("Error processing %s: %s", item.title[:50], e)
+
+            logger.info("=== Collection cycle complete: %d processed (saved, not published) ===", processed_count)
+            return processed_count
+
+        except Exception as e:
+            logger.error("Error in collect_news: %s", e, exc_info=True)
+            return 0
+
+    if _lock_held:
+        return await _run()
+    async with ai_lock:
+        return await _run()
+
+
+async def generate_telegraph_digest(publisher: Publisher, dry_run: bool = False) -> dict:
+    """Scheduler job: run the full Telegraph digest cycle.
+
+    Collects everything since the last digest, rewrites it in Uzbek via AI,
+    publishes one Telegraph page, sends the short announcement to the channel,
+    and updates bookkeeping (last digest time, published flags).
+    """
+    logger.info("=== Starting Telegraph digest cycle ===")
+    from src.digest.telegraph_digest import TelegraphDigestService
+    service = TelegraphDigestService(publisher)
+    return await service.generate(dry_run=dry_run)
 
 
 async def generate_daily_digest(publisher: Publisher) -> None:

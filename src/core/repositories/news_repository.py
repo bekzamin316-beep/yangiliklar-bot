@@ -40,6 +40,23 @@ class NewsRepository(BaseRepository[News]):
         )
         return result.scalars().all()
 
+    async def get_unpublished_since(
+        self, since: datetime, limit: int = 20
+    ) -> Sequence[News]:
+        """Get unpublished news created since a timestamp, by importance."""
+        result = await self.session.execute(
+            select(News)
+            .where(
+                and_(
+                    News.created_at >= since,
+                    News.is_published == False,  # noqa: E712
+                )
+            )
+            .order_by(desc(News.importance_score), desc(News.created_at))
+            .limit(limit)
+        )
+        return result.scalars().all()
+
     async def get_recent(
         self, hours: int = 24, limit: int = 50
     ) -> Sequence[News]:

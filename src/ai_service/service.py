@@ -65,6 +65,11 @@ class AIService:
         # Track models that hit quota limits — skip them for a while
         self._quota_exhausted: dict[str, int] = {}  # model_name → timestamp when it failed
 
+    @property
+    def models(self) -> list[str]:
+        """The configured model rotation chain (public accessor)."""
+        return list(self._models)
+
     def _get_current_model(self) -> str:
         """Return the current model based on rotation state."""
         if self._rotate_every > 0 and len(self._models) > 1:

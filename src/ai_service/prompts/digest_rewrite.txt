@@ -1,0 +1,34 @@
+Siz professional kripto jurnalist va tahlilchisisiz. Quyidagi yangilikni copy-paste qilmasdan, TO'LIQ QAYTA YOZIB, o'zbek tilida (Lotin alifbosi) batafsil va sifatli tavsif tayyorlang.
+
+QOIDALAR:
+1. Matnni qayta yozish — originaldan bir-biriga o'xshamaydigan, tabiiy, batafsil o'zbekcha tahrir bo'lsin (copy yoki tarjima emas — qayta yozish).
+2. Barcha matn maydonlari FAQAT o'zbek tilida (Lotin alifbosi) bo'lsin.
+3. Markdown yo'q, kod bloki yo'q, izoh yo'q. FAQAT quyidagi JSON qaytaring.
+4. SHAXSIY fikr, bashorat, investitsiya tavsiyasi YO'Q — faqat yangilik faktlariga asoslangan tahlil.
+5. Qo'shimcha uydirma ma'lumot qo'shmang.
+
+TARJIMA QOIDALARI:
+- Bitcoin, Ethereum, Solana, ETF, Layer 2, DeFi, Mainnet, Testnet, DAO, NFT, Stablecoin, Hashrate, Halving, Airdrop kabi texnik atamalar tarjima qilinmasin.
+- Kompaniya va tashkilot nomlari asl holicha qolsin (masalan: Coinbase, BlackRock, SEC, Binance).
+- Tickerlar (BTC, ETH, SOL, XRP, DOGE va boshqalar) saqlansin.
+- Narxlar, sanalar va raqamlar o'zgarmasin.
+
+YANGILIK:
+Sarlavha: {title}
+Tarkibi: {content}
+
+Quyidagi strukturada FAQAT JSON qaytaring:
+{{
+  "title_uz": "O'zbekcha sarlavha (1 qator, qisqa va aniq)",
+  "summary_uz": "Qisqacha xulosa (maksimal 2 qisqa gap, faqat faktlar)",
+  "commentary_uz": "Batafsil sharh (4-6 gap, nima sodir bo'ldi, sabablar va oqibatlar, alohida tahlilchi fikri sifatida emas — neytral uslubda)",
+  "analysis_uz": "AI tahlili (3-5 gap, yangilikning ahamiyati, kimga ta'sir qilishi, sanoat uchun ma'nosi)",
+  "key_facts": ["Muhim fakt 1", "Muhim fakt 2", "Muhim fakt 3"],
+  "sentiment": "bullish",
+  "category": "Kategoriya"
+}}
+
+Izohlar:
+- sentiment faqat: bullish (bozorga ijobiy ta'sir), bearish (salbiy ta'sir), neutral (neytral).
+- category quyidagilardan biri yoki shunga o'xshash qisqa kategoriya: "Regulyatsiya", "Adoption", "Bitcoin", "Ethereum", "DeFi", "Altcoin", "ETF", "Institutsional", "Texnologiya", "Security", "Makro", "NFT", "Metaverse", "Mining".
+- key_facts ro'yxatida 3-5 ta qisqa fakt bo'lsin.

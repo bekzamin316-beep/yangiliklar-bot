@@ -76,9 +76,20 @@ class Settings(BaseSettings):
     # Scheduler
     news_check_interval: int = Field(300, description="Seconds between news checks")
     live_price_interval: int = Field(60, description="Seconds between live price updates (default 60)")
-    digest_hour: int = Field(0, description="Hour for daily digest")
-    digest_minute: int = Field(0, description="Minute for daily digest")
+    digest_hour: int = Field(0, description="Hour for daily digest (legacy single-time setting)")
+    digest_minute: int = Field(0, description="Minute for daily digest (legacy single-time setting)")
     digest_timezone: str = Field("Asia/Tashkent", description="Timezone for digest")
+    digest_schedule_times: str = Field(
+        "08:00,12:00,18:00,22:00",
+        description="Comma-separated digest send times in HH:MM (24h), e.g. 08:00,12:00,18:00,22:00",
+    )
+
+    # Telegraph (digest pages)
+    telegraph_api_base: str = Field("https://api.telegra.ph", description="Telegraph API base URL")
+    telegraph_short_name: str = Field("CryptoNews", description="Telegraph account short name")
+    telegraph_author_name: str = Field("Crypto News Bot", description="Telegraph page author name")
+    telegraph_author_url: str = Field("", description="Telegraph page author URL (optional)")
+    digest_max_items: int = Field(12, description="Max news items included in one Telegraph digest page")
 
     # Telegram Client (Telethon) — for reading channel posts in digest
     telegram_api_id: int = Field(0, description="Telegram API ID from my.telegram.org")
@@ -92,6 +103,15 @@ class Settings(BaseSettings):
     request_timeout: int = Field(30, description="HTTP request timeout in seconds")
     importance_threshold: int = Field(50, description="Minimum importance score to publish")
     max_news_per_run: int = Field(20, description="Max news items per collection run")
+
+    @cached_property
+    def digest_schedule_list(self) -> List[str]:
+        """Parse digest schedule times into a sorted list of 'HH:MM' strings."""
+        times = [t.strip() for t in self.digest_schedule_times.split(",") if t.strip()]
+        valid = [t for t in times if len(t.split(":")) == 2 and t.split(":")[0].isdigit() and t.split(":")[1].isdigit()]
+        if not valid:
+            return ["08:00", "12:00", "18:00", "22:00"]
+        return sorted(valid)
 
     @cached_property
     def admin_id_list(self) -> List[int]:
