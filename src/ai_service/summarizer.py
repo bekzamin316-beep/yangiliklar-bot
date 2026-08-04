@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 # Valid sentiment values
 _VALID_SENTIMENTS = {"bullish", "bearish", "neutral"}
 
+# DeepSeek web / free-provider footers appended to some responses
+_WATERMARKS = (
+    "This response is AI-generated, for reference only.",
+    "This is AI-generated content, for reference only.",
+    "Bu javob AI tomonidan yaratilgan, faqat ma'lumot uchun.",
+)
+
 
 class BaseAIProvider:
     """Shared logic for AI providers (prompt building, JSON parsing, HTTP)."""
@@ -117,6 +124,16 @@ class BaseAIProvider:
         await self._before_request()
         return await self._post_chat_completions(url, headers, payload)
 
+    @staticmethod
+    def _strip_watermarks(text: str) -> str:
+        """Remove provider footer watermarks (e.g. DeepSeek web) from responses."""
+        lowered = text.lower()
+        for marker in _WATERMARKS:
+            idx = lowered.find(marker.lower())
+            if idx != -1:
+                text = text[:idx]
+        return text.strip()
+
     async def _post_chat_completions(
         self,
         url: str,
@@ -133,7 +150,7 @@ class BaseAIProvider:
                 data = resp.json()
                 text = data["choices"][0]["message"]["content"]
                 logger.debug("AI response in %.0fms, model=%s", elapsed_ms, self.model)
-                return text
+                return self._strip_watermarks(text)
         except httpx.TimeoutException as e:
             logger.error("AI timeout (%s): type=%s, url=%s", self.timeout, type(e).__name__, url)
             raise
@@ -146,7 +163,7 @@ class BaseAIProvider:
                         resp = await client.post(url, headers=headers, json=payload)
                         resp.raise_for_status()
                         data = resp.json()
-                        return data["choices"][0]["message"]["content"]
+                        return self._strip_watermarks(data["choices"][0]["message"]["content"])
                 except Exception as retry_e:
                     logger.error("AI retry after 429 also failed: %s", retry_e)
                     raise

@@ -18,19 +18,6 @@ class TranslationService:
         self.provider = OmniRouteProvider()
         self.provider.model = "ds-web/deepseek-v4-pro"  # Fast, high-quality Uzbek translation
 
-    @staticmethod
-    def _strip_watermarks(text: str) -> str:
-        """Remove DeepSeek web footer watermarks appended to responses."""
-        for marker in (
-            "This response is AI-generated, for reference only.",
-            "This is AI-generated content, for reference only.",
-            "Bu javob AI tomonidan yaratilgan, faqat ma'lumot uchun.",
-        ):
-            idx = text.lower().find(marker.lower())
-            if idx != -1:
-                text = text[:idx]
-        return text.strip()
-
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=2, min=4, max=30),
@@ -48,7 +35,7 @@ class TranslationService:
                 prompt,
                 system="Siz professional tarjimon. Barcha tarjimalar o'zbek tilida (Lotin alifbosi) bo'lishi shart.",
             )
-            return self._strip_watermarks(translated)
+            return translated.strip()
         except Exception as e:
             logger.error("Translation failed: %s", e)
             return text

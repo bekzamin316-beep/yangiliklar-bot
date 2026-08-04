@@ -7,7 +7,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import settings
 from src.ai_service.models import NewsAnalysis
-from src.ai_service.summarizer import DashScopeProvider, OpenRouterProvider
+from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
 from src.ai_service.translation import TranslationService
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,8 @@ class AIService:
         # Choose provider based on config
         if settings.ai_provider == "openrouter":
             self.primary = OpenRouterProvider()
+        elif settings.ai_provider == "omniroute":
+            self.primary = OmniRouteProvider()
         else:
             self.primary = DashScopeProvider()
 
