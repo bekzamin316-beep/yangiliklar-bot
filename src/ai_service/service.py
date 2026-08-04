@@ -48,6 +48,8 @@ class AIService:
         if settings.ai_backup_api_key:
             if settings.ai_backup_provider == "openrouter":
                 self.backup = OpenRouterProvider()
+            elif settings.ai_backup_provider == "omniroute":
+                self.backup = OmniRouteProvider()
             else:
                 self.backup = DashScopeProvider()
         else:
