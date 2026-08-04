@@ -64,13 +64,13 @@ class BaseAIProvider:
             content=content[:4000],
         )
         system = load_prompt("system_analyze")
-        text = await self.generate(prompt, system=system)
+        text = await self.generate(prompt, system=system, json_mode=True)
         try:
             return self._parse_analysis(text)
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning("JSON parse failed for analysis, retrying once: %s", e)
             retry_prompt = prompt + "\n\nESLATMA: Oldingi javob noto'g'ri JSON edi. FAQAT to'g'ri JSON qaytaring, markdown va izoh yo'q."
-            text = await self.generate(retry_prompt, system=system)
+            text = await self.generate(retry_prompt, system=system, json_mode=True)
             return self._parse_analysis(text)
 
     async def generate_digest(self, news_items: list[dict]) -> list[dict]:
@@ -81,25 +81,27 @@ class BaseAIProvider:
         )
         prompt = load_prompt("digest").format(news_items=items_text)
         system = load_prompt("system_digest")
-        text = await self.generate(prompt, system=system)
+        text = await self.generate(prompt, system=system, json_mode=True)
         try:
             return self._parse_digest(text)
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning("JSON parse failed for digest, retrying once: %s", e)
             retry_prompt = prompt + "\n\nESLATMA: Oldingi javob noto'g'ri JSON edi. FAQAT to'g'ri JSON qaytaring, markdown va izoh yo'q."
-            text = await self.generate(retry_prompt, system=system)
+            text = await self.generate(retry_prompt, system=system, json_mode=True)
             return self._parse_digest(text)
 
     # ------------------------------------------------------------------
     # Shared HTTP layer
     # ------------------------------------------------------------------
-    async def generate(self, prompt: str, system: str | None = None, max_tokens: int | None = None) -> str:
+    async def generate(self, prompt: str, system: str | None = None, max_tokens: int | None = None, json_mode: bool = False) -> str:
         """Send a prompt to the provider and return the AI's text response.
 
         Args:
             prompt: The user prompt.
             system: Optional system prompt.
             max_tokens: Override the default token limit (defaults to 1024).
+            json_mode: When True, request strict JSON output via
+                ``response_format`` (OpenAI-compatible providers).
         """
         messages: list[dict[str, Any]] = []
         # qwen-mt (machine translation) models only accept 'user'/'assistant'
@@ -119,6 +121,8 @@ class BaseAIProvider:
             "max_tokens": max_tokens or 1024,
             **self._extra_payload(),
         }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
 
         headers = {
             "Authorization": f"Bearer {self.api_key}",

@@ -131,7 +131,7 @@ class DigestRewriter:
             for model in models:
                 try:
                     provider.model = model
-                    return await provider.generate(prompt, system=system, max_tokens=max_tokens)
+                    return await provider.generate(prompt, system=system, max_tokens=max_tokens, json_mode=True)
                 except Exception as e:
                     err = str(e)
                     logger.warning("Rewriter model %s (%s) failed: %s",
