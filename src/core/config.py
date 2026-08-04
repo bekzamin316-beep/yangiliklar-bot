@@ -87,8 +87,8 @@ class Settings(BaseSettings):
     # Telegraph (digest pages)
     telegraph_api_base: str = Field("https://api.telegra.ph", description="Telegraph API base URL")
     telegraph_short_name: str = Field("CryptoNews", description="Telegraph account short name")
-    telegraph_author_name: str = Field("Crypto News Bot", description="Telegraph page author name")
-    telegraph_author_url: str = Field("", description="Telegraph page author URL (optional)")
+    telegraph_author_name: str = Field("cripto7yangilik", description="Telegraph page author name")
+    telegraph_author_url: str = Field("https://t.me/cripto7yangilik", description="Telegraph page author URL (optional)")
     digest_max_items: int = Field(12, description="Max news items included in one Telegraph digest page")
 
     # Telegram Client (Telethon) — for reading channel posts in digest
