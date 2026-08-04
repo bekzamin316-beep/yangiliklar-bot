@@ -97,6 +97,7 @@ class TelegraphDigestService:
                 news_count=len(rewritten),
                 ai_summary=ai_summary,
                 telegraph_url=telegraph_url,
+                news_titles=[item.get("title_uz") for item in rewritten],
             )
 
             # 7. Persist: mark news published, save digest, update last-sent time

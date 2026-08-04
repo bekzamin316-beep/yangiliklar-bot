@@ -82,11 +82,14 @@ class Publisher:
         news_count: int,
         ai_summary: str,
         telegraph_url: str,
+        news_titles: list[str] | None = None,
     ) -> int | None:
         """Publish the short digest announcement to the channel.
 
         Per product requirements the channel only receives: digest title,
         news count, short AI summary, and the Telegraph page link.
+        When ``news_titles`` is provided, the numbered bold title list is
+        included before the summary.
 
         Returns the Telegram message_id, or None on failure.
         """
@@ -96,6 +99,12 @@ class Publisher:
             f"📊 <b>{news_count} ta yangilik</b>",
             "",
         ]
+        if news_titles:
+            for t in news_titles:
+                cleaned = str(t or "").strip()
+                if cleaned:
+                    lines.append(f"<b>{html.escape(cleaned)}</b>")
+            lines.append("")
         if ai_summary:
             lines.append(html.escape(ai_summary))
             lines.append("")
