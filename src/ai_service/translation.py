@@ -5,18 +5,31 @@ import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.ai_service.prompt_loader import load_prompt
-from src.ai_service.summarizer import DashScopeProvider
+from src.ai_service.summarizer import OmniRouteProvider
 
 logger = logging.getLogger(__name__)
 
 
 class TranslationService:
-    """Handles translation of AI responses to Uzbek — always uses DashScope for reliability."""
+    """Handles translation of AI responses to Uzbek — uses the OmniRoute router."""
 
     def __init__(self):
-        # Always use DashScope for translation (no rate limits, works reliably)
-        self.provider = DashScopeProvider()
-        self.provider.model = "qwen-mt-plus"  # Dedicated machine-translation model for Uzbek
+        # Use OmniRoute router (self-hosted on Railway) with DeepSeek V4 Pro
+        self.provider = OmniRouteProvider()
+        self.provider.model = "ds-web/deepseek-v4-pro"  # Fast, high-quality Uzbek translation
+
+    @staticmethod
+    def _strip_watermarks(text: str) -> str:
+        """Remove DeepSeek web footer watermarks appended to responses."""
+        for marker in (
+            "This response is AI-generated, for reference only.",
+            "This is AI-generated content, for reference only.",
+            "Bu javob AI tomonidan yaratilgan, faqat ma'lumot uchun.",
+        ):
+            idx = text.lower().find(marker.lower())
+            if idx != -1:
+                text = text[:idx]
+        return text.strip()
 
     @retry(
         stop=stop_after_attempt(3),
@@ -35,7 +48,7 @@ class TranslationService:
                 prompt,
                 system="Siz professional tarjimon. Barcha tarjimalar o'zbek tilida (Lotin alifbosi) bo'lishi shart.",
             )
-            return translated.strip()
+            return self._strip_watermarks(translated)
         except Exception as e:
             logger.error("Translation failed: %s", e)
             return text

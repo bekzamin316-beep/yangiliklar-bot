@@ -351,3 +351,26 @@ class OpenRouterProvider(BaseAIProvider):
     async def _before_request(self) -> None:
         # Respect OpenRouter free-tier rate limits (~20 RPM)
         await asyncio.sleep(2)
+
+
+class OmniRouteProvider(BaseAIProvider):
+    """OmniRoute AI provider — self-hosted OpenAI-compatible LLM router."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._api_base = settings.omniroute_api_base
+        self._api_key = settings.omniroute_api_key or "sk-omniroute"
+        # OmniRoute can be slow (SSE buffering) — allow more headroom than default
+        self.timeout = max(settings.request_timeout, 90)
+
+    @property
+    def api_base(self) -> str:
+        return self._api_base
+
+    @property
+    def api_key(self) -> str:
+        return self._api_key
+
+    def _extra_payload(self) -> dict[str, Any]:
+        # OmniRoute streams SSE by default — force a plain JSON response
+        return {"stream": False}

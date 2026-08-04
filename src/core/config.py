@@ -49,6 +49,13 @@ class Settings(BaseSettings):
         description="Comma-separated list of free models",
     )
 
+    # OmniRoute (self-hosted OpenAI-compatible LLM router on Railway)
+    omniroute_api_base: str = Field(
+        "https://omniroute-production-8602.up.railway.app/v1",
+        description="OmniRoute API base URL (OpenAI-compatible)",
+    )
+    omniroute_api_key: str = Field("", description="OmniRoute API key (empty = no auth needed)")
+
     ai_backup_provider: str = Field("", description="Backup AI provider name")
     ai_backup_api_key: str = Field("", description="Backup AI API key")
 
