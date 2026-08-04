@@ -5,18 +5,26 @@ import logging
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.ai_service.prompt_loader import load_prompt
-from src.ai_service.summarizer import OmniRouteProvider
+from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class TranslationService:
-    """Handles translation of AI responses to Uzbek — uses the OmniRoute router."""
+    """Handles translation of AI responses to Uzbek — uses the configured AI provider."""
 
     def __init__(self):
-        # Use OmniRoute router (self-hosted on Railway) with DeepSeek V4 Pro
-        self.provider = OmniRouteProvider()
-        self.provider.model = "ds-web/deepseek-v4-pro"  # Fast, high-quality Uzbek translation
+        # Use the same provider chain as analysis so translation keeps working
+        # whenever the main AI provider does (previously hardcoded to OmniRoute,
+        # which broke when its deepseek-web credentials expired).
+        if settings.ai_provider == "openrouter":
+            self.provider = OpenRouterProvider()
+        elif settings.ai_provider == "omniroute":
+            self.provider = OmniRouteProvider()
+        else:
+            self.provider = DashScopeProvider()
+        self.provider.model = settings.ai_model
 
     @retry(
         stop=stop_after_attempt(3),

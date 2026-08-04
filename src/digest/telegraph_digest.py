@@ -18,6 +18,8 @@ import logging
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+from sqlalchemy.exc import IntegrityError
+
 from src.core.config import settings
 from src.core.database import get_session
 from src.core.repositories import DigestRepository, NewsRepository
@@ -176,29 +178,28 @@ class TelegraphDigestService:
             most_bullish = next((i["title_uz"] for i in rewritten if i.get("sentiment") == "bullish"), "")
             most_bearish = next((i["title_uz"] for i in rewritten if i.get("sentiment") == "bearish"), "")
 
+            digest_fields = dict(
+                news_count=len(rewritten),
+                ai_summary=ai_summary,
+                most_bullish=most_bullish,
+                most_bearish=most_bearish,
+                is_published=True,
+                channel_message_id=str(msg_id) if msg_id else None,
+                telegraph_url=telegraph_url,
+            )
+
             if existing:
-                await digest_repo.update(
-                    existing.id,
-                    news_count=len(rewritten),
-                    ai_summary=ai_summary,
-                    most_bullish=most_bullish,
-                    most_bearish=most_bearish,
-                    is_published=True,
-                    channel_message_id=str(msg_id) if msg_id else None,
-                    telegraph_url=telegraph_url,
-                )
+                await digest_repo.update(existing.id, **digest_fields)
             else:
-                await digest_repo.create(
-                    digest_date=today,
-                    news_count=len(rewritten),
-                    ai_summary=ai_summary,
-                    full_text="",
-                    most_bullish=most_bullish,
-                    most_bearish=most_bearish,
-                    is_published=True,
-                    channel_message_id=str(msg_id) if msg_id else None,
-                    telegraph_url=telegraph_url,
-                )
+                try:
+                    await digest_repo.create(digest_date=today, full_text="", **digest_fields)
+                except IntegrityError:
+                    # A concurrent digest cycle created the record after our
+                    # get_by_date check — update it instead of failing.
+                    logger.warning("Digest record for %s already exists (race) — updating", today)
+                    existing = await digest_repo.get_by_date(today)
+                    if existing:
+                        await digest_repo.update(existing.id, **digest_fields)
             logger.info("Marked %d news as published; digest record saved", len(published_ids))
 
     # ── Formatting ────────────────────────────────────────────

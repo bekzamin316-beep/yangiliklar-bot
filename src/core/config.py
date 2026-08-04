@@ -45,7 +45,7 @@ class Settings(BaseSettings):
         description="OpenRouter API base URL",
     )
     openrouter_free_models: str = Field(
-        "openai/gpt-oss-120b:free,nvidia/nemotron-nano-12b-v2-vl:free,nvidia/nemotron-3-nano-30b-a3b:free",
+        "nvidia/nemotron-3-nano-30b-a3b:free,nvidia/nemotron-nano-12b-v2-vl:free",
         description="Comma-separated list of free models",
     )
 

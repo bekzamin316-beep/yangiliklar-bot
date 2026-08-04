@@ -4,6 +4,8 @@ import asyncio
 import logging
 from datetime import date, datetime, timezone
 
+from sqlalchemy.exc import IntegrityError
+
 from src.core.config import settings
 from src.core.database import get_session
 from src.core.repositories import NewsRepository, DigestRepository
@@ -229,25 +231,29 @@ async def generate_daily_digest(publisher: Publisher) -> None:
         async with get_session() as session:
             digest_repo = DigestRepository(session)
             existing = await digest_repo.get_by_date(today)
+            digest_fields = dict(
+                ai_summary=ai_summary,
+                full_text=digest_text,
+                most_bullish=most_bullish,
+                most_bearish=most_bearish,
+                is_published=True,
+            )
             if existing:
-                await digest_repo.update(
-                    existing.id,
-                    ai_summary=ai_summary,
-                    full_text=digest_text,
-                    most_bullish=most_bullish,
-                    most_bearish=most_bearish,
-                    is_published=True,
-                )
+                await digest_repo.update(existing.id, **digest_fields)
             else:
-                await digest_repo.create(
-                    digest_date=today,
-                    news_count=len(today_news),
-                    ai_summary=ai_summary,
-                    full_text=digest_text,
-                    most_bullish=most_bullish,
-                    most_bearish=most_bearish,
-                    is_published=True,
-                )
+                try:
+                    await digest_repo.create(
+                        digest_date=today,
+                        news_count=len(today_news),
+                        **digest_fields,
+                    )
+                except IntegrityError:
+                    # A concurrent digest cycle created the record after our
+                    # get_by_date check — update it instead of failing.
+                    logger.warning("Digest record for %s already exists (race) — updating", today)
+                    existing = await digest_repo.get_by_date(today)
+                    if existing:
+                        await digest_repo.update(existing.id, **digest_fields)
 
         # 7. Clean up
         await fetcher.close()
