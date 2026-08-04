@@ -350,8 +350,10 @@ class DashScopeProvider(BaseAIProvider):
         return self._api_key
 
     def _extra_payload(self) -> dict[str, Any]:
-        # Disable thinking for specific Qwen3 models to save tokens
-        if "qwen3" in self.model and "14b" in self.model:
+        # Qwen3 reasoning models consume output tokens on chain-of-thought by
+        # default in non-streaming calls; disable thinking to keep responses
+        # fast, cheap, and free of reasoning_content.
+        if "qwen3" in self.model:
             return {"enable_thinking": False}
         return {}
 
