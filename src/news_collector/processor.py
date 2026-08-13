@@ -9,6 +9,7 @@ from src.core.repositories import NewsRepository
 from src.ai_service.service import AIService
 from src.ai_service.models import NewsAnalysis
 from src.news_collector.models import RawNewsItem
+from src.news_collector.topic_emoji import get_topic_emoji
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ class NewsProcessor:
         analysis = (getattr(news, "analysis", "") or "").strip()
         source = (getattr(news, "source_name", "") or "").strip()
         url = (getattr(news, "source_url", "") or "").strip()
+        tags = getattr(news, "tags", "") or ""
 
         # Fallbacks so we never publish empty sections
         if not title:
@@ -114,8 +116,10 @@ class NewsProcessor:
         if not summary:
             summary = title
 
+        topic_emoji = get_topic_emoji(title=title, tags=tags, summary=summary)
+
         lines: list[str] = []
-        lines.append(f"{sentiment_emoji} <b>{title}</b>")
+        lines.append(f"{sentiment_emoji} {topic_emoji} <b>{title}</b>")
         lines.append("")
         lines.append(summary)
 
