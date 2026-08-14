@@ -89,6 +89,26 @@ class TelegraphDigestService:
                 logger.info("[DRY RUN] Digest ready: %d news, page=%s", len(rewritten), telegraph_url)
                 return {"news_count": len(rewritten), "telegraph_url": telegraph_url, "sent": False, "error": None}
 
+            # 5.5. Generate cover image (optional — skipped in dry-run mode)
+            photo_bytes = None
+            if settings.digest_image_enabled:
+                try:
+                    from src.digest.image_gen import ImageGenerationService
+
+                    img_svc = ImageGenerationService(
+                        models=settings.digest_image_model_list,
+                        size=settings.digest_image_size,
+                    )
+                    prompt = self._build_image_prompt(rewritten)
+                    logger.info("Generating digest cover image …")
+                    photo_bytes = await img_svc.generate(prompt)
+                    if photo_bytes:
+                        logger.info("Cover image generated (%d bytes)", len(photo_bytes))
+                    else:
+                        logger.warning("Cover image generation returned None — continuing without image")
+                except Exception as e:
+                    logger.error("Cover image generation failed: %s", e)
+
             # 6. Channel announcement
             ai_summary = (footer.get("overall_summary") or "").strip()
             market_summary = (footer.get("market_summary") or "").strip()
@@ -103,6 +123,7 @@ class TelegraphDigestService:
                 market_summary=market_summary,
                 outlook=outlook,
                 items=rewritten,
+                photo=photo_bytes,
             )
 
             # 7. Persist: mark news published, save digest, update last-sent time
@@ -229,6 +250,82 @@ class TelegraphDigestService:
         return (
             "📰 <b>Kripto Bozor Digesti</b>\n"
             f"📅 <b>{local.strftime('%d.%m.%Y | %H:%M')}</b>"
+        )
+
+    @staticmethod
+    def _build_image_prompt(items: list[dict]) -> str:
+        """Build an English image-generation prompt from the top news items.
+
+        Maps crypto/finance entities mentioned in the rewritten items to visual
+        concepts that DashScope image models understand well.
+        """
+        # Top items by importance
+        top = sorted(items, key=lambda x: x.get("importance", 0), reverse=True)[:5]
+
+        # Uzbek → English visual concept mapping
+        VISUAL_MAP = {
+            "bitcoin": "Bitcoin BTC golden coin logo symbol",
+            "btc": "Bitcoin BTC golden coin logo symbol",
+            "ethereum": "Ethereum ETH silver blue diamond logo symbol",
+            "eth": "Ethereum ETH silver blue diamond logo symbol",
+            "solana": "Solana SOL purple swirl logo symbol",
+            "sol": "Solana SOL purple swirl logo symbol",
+            "tether": "Tether USDT yellow circle logo symbol",
+            "usdt": "Tether USDT yellow circle logo symbol",
+            "usd": "US Dollar green banknote",
+            "dollar": "US Dollar green banknote",
+            "neft": "crude oil black barrels",
+            "oil": "crude oil black barrels",
+            "oltin": "gold bars shining",
+            "gold": "gold bars shining",
+            "rupiya": "Indian Rupee currency symbol",
+            "rupee": "Indian Rupee currency symbol",
+            "hissadorlik": "stock market candlestick chart",
+            "stock": "stock market candlestick chart",
+            "bozor": "financial market trading screens",
+            "market": "financial market trading screens",
+            "crypto": "cryptocurrency blockchain network nodes",
+            "token": "digital token floating in space",
+            "defi": "DeFi decentralized finance smart contract code",
+            "nft": "NFT digital art frame",
+            "mining": "cryptocurrency mining rig with GPUs",
+            "regulation": "government building with scales of justice",
+            "price": "upward trending financial price chart arrow",
+            "kurs": "currency exchange rate board",
+            "foiz": "percentage interest rate symbol",
+            "investitsiya": "investment portfolio growth chart",
+            "invest": "investment portfolio growth chart",
+        }
+
+        keywords = []
+        seen = set()
+
+        for item in top:
+            title_lower = item.get("title_uz", "").lower()
+            category = item.get("category", "").lower().strip()
+
+            for search_term, visual_desc in VISUAL_MAP.items():
+                if search_term in title_lower or search_term in category:
+                    if visual_desc not in seen:
+                        seen.add(visual_desc)
+                        keywords.append(visual_desc)
+                    break
+
+            # Generic category fallback
+            cat = item.get("category", "").strip()
+            if cat and cat not in ("Kripto", "Crypto") and cat.lower() not in seen:
+                seen.add(cat.lower())
+                keywords.append(cat)
+
+        if not keywords:
+            keywords = ["cryptocurrency blockchain network nodes"]
+
+        topic_str = ", ".join(keywords[:4])
+
+        return (
+            f"Professional crypto finance news cover image, {topic_str}, "
+            "dark gradient background, glowing neon accents, modern digital illustration, "
+            "sleek financial dashboard aesthetic, high contrast, cinematic lighting, 4k"
         )
 
     def _build_page_html(self, items: list[dict], footer: dict) -> str:

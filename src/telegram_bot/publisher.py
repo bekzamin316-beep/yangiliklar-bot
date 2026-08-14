@@ -95,6 +95,7 @@ class Publisher:
         market_summary: str = "",
         outlook: str = "",
         items: list[dict] | None = None,
+        photo: bytes | None = None,
     ) -> int | None:
         """Publish the short digest announcement to the channel.
 
@@ -103,7 +104,10 @@ class Publisher:
         per news item, then the market summary and the outlook section.
         Otherwise it falls back to the simpler title-list format.
 
-        Returns the Telegram message_id, or None on failure.
+        When ``photo`` is provided a cover image is sent first, followed by
+        the full text announcement (Telegram photo-caption limit is 1024 chars).
+
+        Returns the Telegram message_id (of the text message), or None on failure.
         """
         text = build_digest_announcement(
             title=title,
@@ -116,6 +120,46 @@ class Publisher:
             items=items,
         )
 
+        if photo:
+            # Compact caption always fits in 1024-char limit
+            compact_caption = f"{title}\n\n📊 <b>{news_count} ta muhim yangilik</b>\n\n📖 <a href=\"{telegraph_url}\">To'liq digest — Telegraph'da o'qing</a>"
+
+            try:
+                photo_msg = await self.bot.send_photo(
+                    chat_id=self.channel_id,
+                    photo=photo,
+                    caption=compact_caption,
+                    parse_mode=ParseMode.HTML,
+                )
+                logger.info("Sent digest cover photo (msg_id=%d)", photo_msg.message_id)
+
+                # Full text always fits in 4096 (send_message limit)
+                text_msg = await self.bot.send_message(
+                    chat_id=self.channel_id,
+                    text=text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+                logger.info(
+                    "Published digest with cover (%d items, text msg_id=%d / photo msg_id=%d)",
+                    news_count, text_msg.message_id, photo_msg.message_id,
+                )
+                return text_msg.message_id
+            except Exception as e:
+                logger.error("Failed to publish digest with photo: %s", e)
+                # Fallback: send text only
+                try:
+                    msg = await self.bot.send_message(
+                        chat_id=self.channel_id,
+                        text=text,
+                        parse_mode=ParseMode.HTML,
+                        disable_web_page_preview=True,
+                    )
+                    return msg.message_id
+                except Exception:
+                    return None
+
+        # No photo — original behavior
         try:
             msg = await self.bot.send_message(
                 chat_id=self.channel_id,

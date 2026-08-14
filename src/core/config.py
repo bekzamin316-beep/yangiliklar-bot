@@ -100,6 +100,19 @@ class Settings(BaseSettings):
     telegram_session_string: str = Field("", description="Telethon StringSession for Railway deployment (no file needed)")
     digest_source_channels: str = Field("", description="Comma-separated Telegram channel usernames/IDs to read for digest")
 
+    # Digest cover images
+    digest_image_enabled: bool = Field(True, description="Enable auto-generating cover images for digest announcements")
+    digest_image_models: str = Field(
+        "qwen-image,wan2.2-t2i-plus,wan2.2-t2i-flash",
+        description="Comma-separated DashScope image models for fallback chain",
+    )
+    digest_image_size: str = Field("1024*1024", description="Image size (e.g. 1024*1024)")
+
+    @cached_property
+    def digest_image_model_list(self) -> List[str]:
+        """Parse comma-separated image models into a list."""
+        return [m.strip() for m in self.digest_image_models.split(",") if m.strip()]
+
     # General
     log_level: str = Field("INFO", description="Logging level")
     request_timeout: int = Field(30, description="HTTP request timeout in seconds")
