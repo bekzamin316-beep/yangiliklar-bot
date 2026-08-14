@@ -37,6 +37,16 @@ async def on_startup(bot, publisher: Publisher) -> None:
         except Exception as e:
             logger.error("Digest fix failed: %s", e, exc_info=True)
 
+    # One-off: re-edit Telegram channel digest announcement posts in Uzbek
+    if os.environ.get("FIX_POSTS") == "1":
+        logger.info("FIX_POSTS=1 detected — editing channel digest posts...")
+        try:
+            from src.digest.fix_posts import fix_posts
+            result = await fix_posts()
+            logger.info("Posts fix result: %s", result)
+        except Exception as e:
+            logger.error("Posts fix failed: %s", e, exc_info=True)
+
     # Load dedup cache from DB
     from src.scheduler.jobs import init_dedup_cache
     await init_dedup_cache()
