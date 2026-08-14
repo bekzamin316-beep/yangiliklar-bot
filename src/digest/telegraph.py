@@ -118,6 +118,42 @@ class TelegraphClient:
         logger.info("Telegraph page created: %s", url)
         return url
 
+    async def edit_page(self, path: str, title: str, content_html: str) -> str:
+        """Edit an existing page (created by the same account).
+
+        Args:
+            path: The page path from its URL (the part after telegra.ph/).
+            title: New page title.
+            content_html: New page content as an HTML fragment.
+
+        Returns:
+            The updated page URL.
+
+        Raises:
+            TelegraphError: if the API rejects the request.
+        """
+        token = await self._load_token()
+
+        if len(content_html.encode("utf-8")) > _TELEGRAPH_CONTENT_LIMIT:
+            content_html = self._truncate_html(content_html, _TELEGRAPH_CONTENT_LIMIT)
+
+        nodes = self._html_to_nodes(content_html)
+
+        params = {
+            "access_token": token,
+            "path": path,
+            "title": title,
+            "author_name": settings.telegraph_author_name,
+            "content": json.dumps(nodes),
+            "return_content": False,
+        }
+        data = await self._api_call("editPage", params=params)
+        url = data.get("url", "")
+        if not url:
+            raise TelegraphError("Telegraph editPage returned no URL")
+        logger.info("Telegraph page edited: %s", url)
+        return url
+
     # ── Low level ─────────────────────────────────────────────
 
     async def _api_call(self, method: str, params: dict[str, Any]) -> dict:

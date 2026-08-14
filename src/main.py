@@ -26,6 +26,17 @@ async def on_startup(bot, publisher: Publisher) -> None:
     collector = NewsCollector()
     await collector.ensure_sources_seeded()
 
+    # One-off: fix the latest digest page (retranslate into Uzbek)
+    import os
+    if os.environ.get("FIX_DIGEST") == "1":
+        logger.info("FIX_DIGEST=1 detected — running digest fix...")
+        try:
+            from src.digest.fix_last_digest import fix_last_digest
+            result = await fix_last_digest()
+            logger.info("Digest fix result: %s", result)
+        except Exception as e:
+            logger.error("Digest fix failed: %s", e, exc_info=True)
+
     # Load dedup cache from DB
     from src.scheduler.jobs import init_dedup_cache
     await init_dedup_cache()
