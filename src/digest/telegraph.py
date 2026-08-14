@@ -118,6 +118,54 @@ class TelegraphClient:
         logger.info("Telegraph page created: %s", url)
         return url
 
+    async def get_page(self, path: str) -> dict:
+        """Fetch an existing page (title + source links) for inspection.
+
+        Args:
+            path: The page path from its URL (the part after telegra.ph/).
+
+        Returns:
+            A dict with keys ``title`` (str) and ``links`` (list of hrefs).
+        """
+        params = {"path": path, "return_content": True}
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(f"{self._base}/getPage", data=params)
+                data = resp.json()
+        except httpx.TimeoutException:
+            logger.error("Telegraph getPage timed out")
+            raise TelegraphError("Telegraph getPage timed out")
+        except Exception as e:
+            logger.error("Telegraph getPage request failed: %s", e)
+            raise TelegraphError(f"Telegraph getPage request failed: {e}")
+
+        if not data.get("ok"):
+            error = data.get("error", "unknown error")
+            logger.error("Telegraph getPage error: %s", error)
+            raise TelegraphError(f"Telegraph getPage failed: {error}")
+
+        result = data.get("result") or {}
+        links = self._extract_links(result.get("content") or [])
+        return {"title": result.get("title", ""), "links": links}
+
+    @classmethod
+    def _extract_links(cls, nodes: list, links: list[str] | None = None) -> list[str]:
+        """Recursively collect ``href`` values from a Telegraph Node array."""
+        if links is None:
+            links = []
+        for node in nodes:
+            if isinstance(node, str):
+                continue
+            if isinstance(node, dict):
+                attrs = node.get("attrs") or {}
+                href = attrs.get("href")
+                if href:
+                    links.append(href)
+                children = node.get("children")
+                if children:
+                    cls._extract_links(children, links)
+        return links
+
     async def edit_page(self, path: str, title: str, content_html: str) -> str:
         """Edit an existing page (created by the same account).
 

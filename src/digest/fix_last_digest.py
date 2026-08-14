@@ -30,41 +30,83 @@ async def fix_last_digest(dry_run: bool = False) -> dict:
     await init_db()
 
     try:
-        # 1. Latest digest record → find its Telegraph path + news
-        async with get_session() as session:
-            digest_repo = DigestRepository(session)
-            recent = await digest_repo.get_recent(limit=1)
-            if not recent:
-                logger.info("No digest records found — nothing to fix")
-                return {"fixed": False, "reason": "no_digest"}
+        # Optional explicit target: FIX_DIGEST_URL=<full telegra.ph URL>.
+        # When set, fix that exact page and the news whose source_url appears
+        # on it (instead of the latest digest record, which only keeps one
+        # telegraph_url per day and can point at an older digest).
+        target_url = (getattr(settings, "fix_digest_url", "") or "").strip()
+        msg_id = None
+        news_items: list = []
+        digest = None
 
-            digest = recent[0]
-            telegraph_url = digest.telegraph_url or ""
-            msg_id = digest.channel_message_id
+        if target_url:
+            path = target_url.rstrip("/").rsplit("/", 1)[-1]
+            logger.info("FIX_DIGEST_URL set — targeting %s", target_url)
+            client = TelegraphClient()
+            try:
+                page_info = await client.get_page(path)
+            except Exception as e:
+                logger.error("Could not read target page %s: %s", path, e)
+                return {"fixed": False, "reason": f"get_page_failed: {e}"}
+            page_links = page_info.get("links") or []
+            logger.info("Target page has %d source links", len(page_links))
+            telegraph_url = target_url
 
-            if not telegraph_url:
-                logger.info("Latest digest has no Telegraph URL — nothing to fix")
-                return {"fixed": False, "reason": "no_telegraph_url"}
+            async with get_session() as session:
+                from sqlalchemy import select
+                from src.models.news import News
+                all_news = list((await session.execute(select(News))).scalars().all())
+            if page_links:
+                seen: set[int] = set()
+                for link in page_links:
+                    for n in all_news:
+                        nurl = (n.source_url or "").rstrip("/")
+                        if link.rstrip("/") == nurl or (link and nurl and link.rstrip("/").split("?")[0] == nurl.split("?")[0]):
+                            if n.id not in seen:
+                                seen.add(n.id)
+                                news_items.append(n)
+                news_items.sort(key=lambda n: n.created_at)
+            if not news_items:
+                logger.info("No news matched page source links — falling back to recent 24h")
+                async with get_session() as session:
+                    news_repo = NewsRepository(session)
+                    news_items = list(await news_repo.get_recent(hours=24, limit=settings.digest_max_items))
+        else:
+            # 1. Latest digest record → find its Telegraph path + news
+            async with get_session() as session:
+                digest_repo = DigestRepository(session)
+                recent = await digest_repo.get_recent(limit=1)
+                if not recent:
+                    logger.info("No digest records found — nothing to fix")
+                    return {"fixed": False, "reason": "no_digest"}
 
-            # Load the news that belong to this digest (published with same msg_id)
-            news_repo = NewsRepository(session)
-            if msg_id:
-                try:
-                    msg_id_int = int(msg_id)
-                except (TypeError, ValueError):
-                    msg_id_int = None
-                if msg_id_int:
-                    from sqlalchemy import select
-                    from src.models.news import News
-                    result = await session.execute(
-                        select(News).where(News.channel_message_id == msg_id_int)
-                        .order_by(News.created_at)
-                    )
-                    news_items = list(result.scalars().all())
+                digest = recent[0]
+                telegraph_url = digest.telegraph_url or ""
+                msg_id = digest.channel_message_id
+
+                if not telegraph_url:
+                    logger.info("Latest digest has no Telegraph URL — nothing to fix")
+                    return {"fixed": False, "reason": "no_telegraph_url"}
+
+                # Load the news that belong to this digest (published with same msg_id)
+                news_repo = NewsRepository(session)
+                if msg_id:
+                    try:
+                        msg_id_int = int(msg_id)
+                    except (TypeError, ValueError):
+                        msg_id_int = None
+                    if msg_id_int:
+                        from sqlalchemy import select
+                        from src.models.news import News
+                        result = await session.execute(
+                            select(News).where(News.channel_message_id == msg_id_int)
+                            .order_by(News.created_at)
+                        )
+                        news_items = list(result.scalars().all())
+                    else:
+                        news_items = list(await news_repo.get_recent(hours=24, limit=settings.digest_max_items))
                 else:
                     news_items = list(await news_repo.get_recent(hours=24, limit=settings.digest_max_items))
-            else:
-                news_items = list(await news_repo.get_recent(hours=24, limit=settings.digest_max_items))
 
         if not news_items:
             logger.info("No news items found for the digest — nothing to fix")
@@ -123,13 +165,14 @@ async def fix_last_digest(dry_run: bool = False) -> dict:
             ai_summary = (footer.get("overall_summary") or "").strip()
             async with get_session() as session:
                 digest_repo = DigestRepository(session)
-                await digest_repo.update(
-                    digest.id,
-                    ai_summary=ai_summary,
-                    most_bullish=next((i["title_uz"] for i in rewritten if i.get("sentiment") == "bullish"), ""),
-                    most_bearish=next((i["title_uz"] for i in rewritten if i.get("sentiment") == "bearish"), ""),
-                    telegraph_url=new_url,
-                )
+                if digest is not None:
+                    await digest_repo.update(
+                        digest.id,
+                        ai_summary=ai_summary,
+                        most_bullish=next((i["title_uz"] for i in rewritten if i.get("sentiment") == "bullish"), ""),
+                        most_bearish=next((i["title_uz"] for i in rewritten if i.get("sentiment") == "bearish"), ""),
+                        telegraph_url=new_url,
+                    )
 
         logger.info("Digest page fixed: %s", new_url)
         return {"fixed": True, "url": new_url, "news_count": len(rewritten)}
