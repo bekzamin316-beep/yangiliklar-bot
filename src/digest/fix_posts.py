@@ -100,12 +100,14 @@ async def fix_posts() -> dict:
             footer = await rewriter.generate_market_summary(rewritten)
 
             # Rebuild announcement text (same format as publish_digest_message)
-            import html
             from src.digest.telegraph_digest import TelegraphDigestService
+            from src.telegram_bot.publisher import build_digest_announcement
             svc = TelegraphDigestService.__new__(TelegraphDigestService)
             now = datetime.now(timezone.utc)
             title = svc._announcement_title(now)
             ai_summary = (footer.get("overall_summary") or "").strip()
+            market_summary = (footer.get("market_summary") or "").strip()
+            outlook = (footer.get("outlook_uz") or "").strip()
             telegraph_url = ""
             async with get_session() as session:
                 from src.core.repositories import DigestRepository
@@ -114,17 +116,15 @@ async def fix_posts() -> dict:
                 if recent:
                     telegraph_url = recent[0].telegraph_url or ""
 
-            lines = [title, "", f"📊 <b>{len(rewritten)} ta yangilik</b>", ""]
-            for r in rewritten:
-                t = str(r.get("title_uz") or "").strip()
-                if t:
-                    lines.append(f"<b>{html.escape(t)}</b>")
-            lines.append("")
-            if ai_summary:
-                lines.append(html.escape(ai_summary))
-                lines.append("")
-            lines.append(f"📖 <a href=\"{telegraph_url}\">To'liq digest — Telegraph'da o'qing</a>")
-            text = "\n".join(lines)
+            text = build_digest_announcement(
+                title=title,
+                news_count=len(rewritten),
+                ai_summary=ai_summary,
+                telegraph_url=telegraph_url,
+                market_summary=market_summary,
+                outlook=outlook,
+                items=rewritten,
+            )
 
             ok = await publisher.edit_message_text(msg_id, text)
             if ok:

@@ -2,6 +2,7 @@
 
 import html
 import logging
+import re
 
 from aiogram import Bot
 from aiogram.enums import ParseMode
@@ -13,6 +14,14 @@ from src.core.repositories import NewsRepository
 from src.news_collector.processor import NewsProcessor
 
 logger = logging.getLogger(__name__)
+
+_MD_BOLD = re.compile(r"\*\*(.+?)\*\*")
+
+
+def _rich(text: str) -> str:
+    """Escape HTML, then convert ``**bold**`` markers into ``<b>…</b>``."""
+    text = html.escape(str(text or ""), quote=False)
+    return _MD_BOLD.sub(lambda m: f"<b>{m.group(1)}</b>", text)
 
 
 class Publisher:
@@ -83,37 +92,34 @@ class Publisher:
         ai_summary: str,
         telegraph_url: str,
         news_titles: list[str] | None = None,
+        market_summary: str = "",
+        outlook: str = "",
+        items: list[dict] | None = None,
     ) -> int | None:
         """Publish the short digest announcement to the channel.
 
-        Per product requirements the channel only receives: digest title,
-        news count, short AI summary, and the Telegraph page link.
-        When ``news_titles`` is provided, the numbered bold title list is
-        included before the summary.
+        When ``items`` (rewritten digest dicts) is provided the announcement is
+        built in the rich channel format: one emoji + bold-keyword teaser line
+        per news item, then the market summary and the outlook section.
+        Otherwise it falls back to the simpler title-list format.
 
         Returns the Telegram message_id, or None on failure.
         """
-        lines = [
-            title,
-            "",
-            f"📊 <b>{news_count} ta yangilik</b>",
-            "",
-        ]
-        if news_titles:
-            for t in news_titles:
-                cleaned = str(t or "").strip()
-                if cleaned:
-                    lines.append(f"<b>{html.escape(cleaned)}</b>")
-            lines.append("")
-        if ai_summary:
-            lines.append(html.escape(ai_summary))
-            lines.append("")
-        lines.append(f"📖 <a href=\"{telegraph_url}\">To'liq digest — Telegraph'da o'qing</a>")
+        text = build_digest_announcement(
+            title=title,
+            news_count=news_count,
+            ai_summary=ai_summary,
+            telegraph_url=telegraph_url,
+            news_titles=news_titles,
+            market_summary=market_summary,
+            outlook=outlook,
+            items=items,
+        )
 
         try:
             msg = await self.bot.send_message(
                 chat_id=self.channel_id,
-                text="\n".join(lines),
+                text=text,
                 parse_mode=ParseMode.HTML,
                 disable_web_page_preview=True,
             )
@@ -172,3 +178,54 @@ class Publisher:
         except Exception as e:
             logger.error("Unexpected error editing message %d: %s", message_id, e)
             return False
+
+
+def build_digest_announcement(
+    title: str,
+    news_count: int,
+    ai_summary: str = "",
+    telegraph_url: str = "",
+    news_titles: list[str] | None = None,
+    market_summary: str = "",
+    outlook: str = "",
+    items: list[dict] | None = None,
+) -> str:
+    """Build the digest announcement text for the channel.
+
+    When ``items`` (rewritten digest dicts with ``teaser_uz``) is provided the
+    rich format is used: one emoji + bold-teaser line per news item, followed by
+    the market summary and outlook sections. Otherwise a simple bold title list
+    + AI summary fallback is produced.
+    """
+    if items:
+        lines = [title, "", f"📊 <b>{news_count} ta muhim yangilik</b>", ""]
+        for it in items:
+            emoji = str(it.get("emoji") or "🔹").strip() or "🔹"
+            teaser = str(it.get("teaser_uz") or "").strip()
+            if not teaser:
+                teaser = str(it.get("title_uz") or "").strip()
+            if teaser:
+                lines.append(f"{emoji} {_rich(teaser)}")
+                lines.append("")
+        if market_summary:
+            lines.append("📈 <b>Bozor xulosasi:</b>")
+            lines.append(_rich(market_summary))
+            lines.append("")
+        if outlook:
+            lines.append(f"🔎 {_rich(outlook)}")
+            lines.append("")
+    else:
+        lines = [title, "", f"📊 <b>{news_count} ta yangilik</b>", ""]
+        if news_titles:
+            for t in news_titles:
+                cleaned = str(t or "").strip()
+                if cleaned:
+                    lines.append(f"<b>{html.escape(cleaned)}</b>")
+            lines.append("")
+        if ai_summary:
+            lines.append(html.escape(ai_summary))
+            lines.append("")
+
+    if telegraph_url:
+        lines.append(f"📖 <a href=\"{telegraph_url}\">To'liq digest — Telegraph'da o'qing</a>")
+    return "\n".join(lines)

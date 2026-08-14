@@ -13,5 +13,6 @@ YANGILIKLAR (sarlavha | sentiment | muhimlik | qisqa xulosa):
 Quyidagi strukturada FAQAT JSON qaytaring:
 {{
   "market_summary": "Bozor xulosasi — 4-6 gap, umumiy tendensiya, qaysi soha harakatda",
-  "overall_summary": "Umumiy AI xulosa — 3-5 gap, kunlik bozor rasmi, eng muhim voqea, keyingi e'tibor"
+  "overall_summary": "Umumiy AI xulosa — 3-5 gap, kunlik bozor rasmi, eng muhim voqea, keyingi e'tibor",
+  "outlook_uz": "Kelgusi kunlarga nazar — 2-3 gap, investorlar e'tiborida bo'ladigan yo'nalishlar, **qalin** belgilar bilan muhim atamalar ajratilgan bo'lsin (masalan: Kelgusi kunlarda **stabilkoinlar zaxiralarining shaffofligi** va **DeFi integratsiyalari** diqqat markazida bo'ladi)"
 }}

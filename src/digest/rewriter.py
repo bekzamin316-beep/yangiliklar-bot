@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 _VALID_SENTIMENTS = {"bullish", "bearish", "neutral"}
 
+_SENTIMENT_EMOJI = {"bullish": "🟢", "bearish": "🔴", "neutral": "⚪️"}
+
 
 class DigestRewriter:
     """Rewrites news items into detailed Uzbek digest articles via AI."""
@@ -90,7 +92,7 @@ class DigestRewriter:
     async def generate_market_summary(self, rewritten_items: list[dict]) -> dict:
         """Generate the market summary + overall AI summary for the page footer."""
         if not rewritten_items:
-            return {"market_summary": "", "overall_summary": ""}
+            return {"market_summary": "", "overall_summary": "", "outlook_uz": ""}
 
         compact = "\n".join(
             f"- {i.get('title_uz', '')[:150]} | {i.get('sentiment', 'neutral')} | "
@@ -101,7 +103,7 @@ class DigestRewriter:
         try:
             prompt = load_prompt("digest_market_summary").format(items=compact)
             system = load_prompt("system_digest")
-            text = await self._generate_with_fallback(prompt, system=system, max_tokens=1200)
+            text = await self._generate_with_fallback(prompt, system=system, max_tokens=1400)
             if text is None:
                 raise ValueError("All models failed")
             data = self._extract_json(text)
@@ -110,10 +112,11 @@ class DigestRewriter:
             return {
                 "market_summary": str(data.get("market_summary", "") or "").strip(),
                 "overall_summary": str(data.get("overall_summary", "") or "").strip(),
+                "outlook_uz": str(data.get("outlook_uz", "") or "").strip(),
             }
         except Exception as e:
             logger.error("Market summary generation failed: %s", e)
-            return {"market_summary": "", "overall_summary": ""}
+            return {"market_summary": "", "overall_summary": "", "outlook_uz": ""}
 
     # ── Generation with fallback ─────────────────────────────
 
@@ -162,6 +165,8 @@ class DigestRewriter:
         summary_uz = str(data.get("summary_uz", "") or "").strip()
         commentary_uz = str(data.get("commentary_uz", "") or "").strip()
         analysis_uz = str(data.get("analysis_uz", "") or "").strip()
+        teaser_uz = str(data.get("teaser_uz", "") or "").strip()
+        emoji = str(data.get("emoji", "") or "").strip()
         category = str(data.get("category", "") or "").strip()
 
         # Fallbacks per field so the page never has empty sections
@@ -173,6 +178,10 @@ class DigestRewriter:
             commentary_uz = analysis_uz or title_uz
         if not analysis_uz:
             analysis_uz = commentary_uz or title_uz
+        if not teaser_uz:
+            teaser_uz = summary_uz or title_uz
+        if not emoji:
+            emoji = _SENTIMENT_EMOJI.get(sentiment, "🔹")
         if not category:
             category = "Kripto"
         if not key_facts:
@@ -183,6 +192,8 @@ class DigestRewriter:
             "summary_uz": summary_uz,
             "commentary_uz": commentary_uz,
             "analysis_uz": analysis_uz,
+            "teaser_uz": teaser_uz,
+            "emoji": emoji,
             "key_facts": key_facts,
             "sentiment": sentiment,
             "category": category,
@@ -221,6 +232,8 @@ class DigestRewriter:
             "summary_uz": summary_uz,
             "commentary_uz": analysis_uz,
             "analysis_uz": analysis_uz,
+            "teaser_uz": summary_uz or title_uz,
+            "emoji": _SENTIMENT_EMOJI.get(sentiment, "🔹"),
             "key_facts": [summary_uz[:160]],
             "sentiment": sentiment,
             "category": category,

@@ -91,6 +91,8 @@ class TelegraphDigestService:
 
             # 6. Channel announcement
             ai_summary = (footer.get("overall_summary") or "").strip()
+            market_summary = (footer.get("market_summary") or "").strip()
+            outlook = (footer.get("outlook_uz") or "").strip()
             announcement_title = self._announcement_title(now)
             msg_id = await self.publisher.publish_digest_message(
                 title=announcement_title,
@@ -98,6 +100,9 @@ class TelegraphDigestService:
                 ai_summary=ai_summary,
                 telegraph_url=telegraph_url,
                 news_titles=[item.get("title_uz") for item in rewritten],
+                market_summary=market_summary,
+                outlook=outlook,
+                items=rewritten,
             )
 
             # 7. Persist: mark news published, save digest, update last-sent time
@@ -221,7 +226,10 @@ class TelegraphDigestService:
     @staticmethod
     def _announcement_title(now: datetime) -> str:
         local = TelegraphDigestService._localize(now)
-        return f"📰 <b>Kripto Bozor Digesti</b>\n📅 {local.strftime('%d.%m.%Y %H:%M')}"
+        return (
+            "📰 <b>Kripto Bozor Digesti</b>\n"
+            f"📅 <b>{local.strftime('%d.%m.%Y | %H:%M')}</b>"
+        )
 
     def _build_page_html(self, items: list[dict], footer: dict) -> str:
         """Build the full Telegraph page HTML (all news + market/footer summary)."""

@@ -20,6 +20,8 @@ Tarkibi: {content}
 Quyidagi strukturada FAQAT JSON qaytaring:
 {{
   "title_uz": "O'zbekcha sarlavha (1 qator, qisqa va aniq)",
+  "teaser_uz": "Telegram kanal posti uchun qisqa 1 gap teaser — yangilikning mohiyatini jonli va qiziqarli ifoda etsin; muhim atama va kompaniya nomlarini **qalin** belgilar ichida yozing (masalan: **Flare** tarmog'i FXRP orqali XRP egalari uchun **on-chain opsionlar** imkoniyatini ishga tushirdi)",
+  "emoji": "Teaser uchun mos 1 ta emoji (masalan 🚀, 📉, ⚠️, 💰, 🏛, 📊, 🟢, 🔴, 🔒, 🤖)",
   "summary_uz": "Qisqacha xulosa (maksimal 2 qisqa gap, faqat faktlar)",
   "commentary_uz": "Batafsil sharh (4-6 gap, nima sodir bo'ldi, sabablar va oqibatlar, alohida tahlilchi fikri sifatida emas — neytral uslubda)",
   "analysis_uz": "AI tahlili (3-5 gap, yangilikning ahamiyati, kimga ta'sir qilishi, sanoat uchun ma'nosi)",
@@ -32,3 +34,4 @@ Izohlar:
 - sentiment faqat: bullish (bozorga ijobiy ta'sir), bearish (salbiy ta'sir), neutral (neytral).
 - category quyidagilardan biri yoki shunga o'xshash qisqa kategoriya: "Regulyatsiya", "Adoption", "Bitcoin", "Ethereum", "DeFi", "Altcoin", "ETF", "Institutsional", "Texnologiya", "Security", "Makro", "NFT", "Metaverse", "Mining".
 - key_facts ro'yxatida 3-5 ta qisqa fakt bo'lsin.
+- teaser_uz da **qalin** belgilardan tashqari hech qanday markdown ishlatilmang.
