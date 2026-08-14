@@ -79,6 +79,24 @@ async def on_startup(bot, publisher: Publisher) -> None:
     )
     logger.info("Bot started: @%s", me.username)
 
+    # One-off: trigger a single digest immediately (for on-demand testing)
+    import os as _os
+    if _os.environ.get("RUN_DIGEST_NOW") == "1":
+        logger.info("RUN_DIGEST_NOW=1 detected — triggering one-off digest...")
+        try:
+            from src.scheduler.jobs import generate_telegraph_digest
+            result = await generate_telegraph_digest(publisher)
+            logger.info("One-off digest result: %s", result)
+            await publisher.send_admin_notification(
+                f"📬 <b>Digest yuborildi!</b>\n\n"
+                f"📰 Yangiliklar: {result.get('news_count', 0)}\n"
+                f"📖 Sahifa: {result.get('telegraph_url', '')}\n"
+                f"✅ Status: {'Yuborildi' if result.get('sent') else 'Beklapti'}"
+            )
+        except Exception as e:
+            logger.error("One-off digest failed: %s", e, exc_info=True)
+            await publisher.send_admin_notification(f"❌ <b>Digest xato:</b> {e}")
+
 
 async def on_shutdown(bot, scheduler) -> None:
     """Actions to run on bot shutdown."""
