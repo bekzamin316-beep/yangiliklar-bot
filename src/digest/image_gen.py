@@ -12,7 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 class ImageGenerationService:
-    """Generate cover images for digest announcements via DashScope."""
+    """Generate cover images for digest pages via DashScope.
+
+    The DashScope text-to-image API is task-based (async). We submit a task,
+    poll until it succeeds, and return the OSS image URL that the result
+    contains.  The URL is valid for several days — more than enough for a
+    daily digest page that is refreshed every 4 h.
+    """
 
     def __init__(self, models: list[str] | None = None, size: str = "1024*1024"):
         self.models = models or ["qwen-image", "wan2.2-t2i-plus", "wan2.2-t2i-flash"]
@@ -21,15 +27,15 @@ class ImageGenerationService:
             "/compatible-mode/v1", "/api/v1"
         )
         self.api_key = settings.dashscope_api_key
-        self.poll_timeout = 120  # seconds to wait for task completion
+        self.poll_timeout = 180  # seconds to wait for task completion
 
     # ── Public API ────────────────────────────────────────────────
 
-    async def generate(self, prompt: str) -> bytes | None:
+    async def generate(self, prompt: str) -> str | None:
         """Generate an image from a prompt string.
 
         Tries each model in the fallback chain until one succeeds.
-        Returns raw image bytes, or ``None`` if every model fails.
+        Returns the image URL, or ``None`` if every model fails.
         """
         for model in self.models:
             try:
@@ -44,7 +50,10 @@ class ImageGenerationService:
                     logger.warning("Image gen: task failed or timed out for %s", model)
                     continue
 
-                return await self._download(result["url"])
+                url = result.get("url")
+                if url:
+                    logger.info("Image gen: succeeded with %s", model)
+                    return url
             except Exception as e:
                 logger.warning("Image gen failed with %s: %s", model, e)
 
@@ -107,10 +116,3 @@ class ImageGenerationService:
 
         logger.warning("Image task timed out after %ds (id=%s)", self.poll_timeout, task_id)
         return None
-
-    async def _download(self, url: str) -> bytes:
-        """Download image binary from OSS URL."""
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.content

@@ -80,17 +80,8 @@ class TelegraphDigestService:
                 # 4. Market + overall summary
                 footer = await self.rewriter.generate_market_summary(rewritten)
 
-            # 5. Build Telegraph page
-            page_title = self._page_title(now)
-            html_content = self._build_page_html(rewritten, footer)
-            telegraph_url = await self.telegraph.create_page(page_title, html_content)
-
-            if dry_run:
-                logger.info("[DRY RUN] Digest ready: %d news, page=%s", len(rewritten), telegraph_url)
-                return {"news_count": len(rewritten), "telegraph_url": telegraph_url, "sent": False, "error": None}
-
-            # 5.5. Generate cover image (optional — skipped in dry-run mode)
-            photo_bytes = None
+            # 5. Generate cover image (optional — skipped in dry-run mode)
+            image_url = None
             if settings.digest_image_enabled:
                 try:
                     from src.digest.image_gen import ImageGenerationService
@@ -101,13 +92,24 @@ class TelegraphDigestService:
                     )
                     prompt = self._build_image_prompt(rewritten)
                     logger.info("Generating digest cover image …")
-                    photo_bytes = await img_svc.generate(prompt)
-                    if photo_bytes:
-                        logger.info("Cover image generated (%d bytes)", len(photo_bytes))
+                    image_url = await img_svc.generate(prompt)
+                    if image_url:
+                        logger.info("Cover image generated: %s", image_url[:80])
                     else:
                         logger.warning("Cover image generation returned None — continuing without image")
                 except Exception as e:
                     logger.error("Cover image generation failed: %s", e)
+
+            # 5.1. Build Telegraph page (embed cover image at top if generated)
+            page_title = self._page_title(now)
+            html_content = self._build_page_html(rewritten, footer)
+            if image_url:
+                html_content = f'<img src="{image_url}" alt="Digest cover image" />\n' + html_content
+            telegraph_url = await self.telegraph.create_page(page_title, html_content)
+
+            if dry_run:
+                logger.info("[DRY RUN] Digest ready: %d news, page=%s", len(rewritten), telegraph_url)
+                return {"news_count": len(rewritten), "telegraph_url": telegraph_url, "sent": False, "error": None}
 
             # 6. Channel announcement
             ai_summary = (footer.get("overall_summary") or "").strip()
@@ -123,7 +125,6 @@ class TelegraphDigestService:
                 market_summary=market_summary,
                 outlook=outlook,
                 items=rewritten,
-                photo=photo_bytes,
             )
 
             # 7. Persist: mark news published, save digest, update last-sent time

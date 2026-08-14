@@ -118,6 +118,54 @@ class TelegraphClient:
         logger.info("Telegraph page created: %s", url)
         return url
 
+    async def upload_image(self, file_bytes: bytes) -> str | None:
+        """Upload an image to Telegraph's CDN and return the ``src`` URL.
+
+        The returned string is ready to embed as ``<img src="...">``.
+
+        Returns ``None`` on failure so callers can gracefully skip the image.
+        """
+        # Detect image format from magic bytes
+        if file_bytes[:8] == b"\x89PNG\r\n\x1a\n":
+            filename, content_type = "image.png", "image/png"
+        elif file_bytes[:3] == b"\xff\xd8\xff":
+            filename, content_type = "image.jpeg", "image/jpeg"
+        elif file_bytes[:6] == b"GIF87a" or file_bytes[:6] == b"GIF89a":
+            filename, content_type = "image.gif", "image/gif"
+        else:
+            filename, content_type = "image.png", "image/png"
+
+        files = {"file": (filename, file_bytes, content_type)}
+        upload_url = "https://telegra.ph/upload"
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(upload_url, files=files)
+                resp.raise_for_status()
+                data = resp.json()
+        except (httpx.TimeoutException, httpx.HTTPStatusError) as e:
+            logger.error("Telegraph image upload failed: %s", e)
+            return None
+        except Exception as e:
+            logger.error("Telegraph image upload unexpected error: %s", e)
+            return None
+
+        if not data.get("ok"):
+            logger.error("Telegraph upload error: %s", data.get("error", "unknown"))
+            return None
+
+        results = data.get("result") or []
+        if not results:
+            logger.warning("Telegraph upload returned no result items")
+            return None
+
+        src = results[0].get("src", "")
+        if not src:
+            return None
+        if not src.startswith("http"):
+            src = "https:" + src
+        logger.info("Telegraph image uploaded: %s", src)
+        return src
+
     async def get_page(self, path: str) -> dict:
         """Fetch an existing page (title + source links) for inspection.
 
