@@ -58,6 +58,7 @@ class Settings(BaseSettings):
 
     ai_backup_provider: str = Field("", description="Backup AI provider name")
     ai_backup_api_key: str = Field("", description="Backup AI API key")
+    ai_model_backup: str = Field("", description="Model used by the backup provider (e.g. omniroute model)")
 
     # Translation
     enable_translation: bool = Field(True, description="Enable translation to target language")

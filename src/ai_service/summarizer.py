@@ -403,3 +403,56 @@ class OmniRouteProvider(BaseAIProvider):
     def _extra_payload(self) -> dict[str, Any]:
         # OmniRoute streams SSE by default — force a plain JSON response
         return {"stream": False}
+
+    @staticmethod
+    def _parse_sse(text: str) -> str:
+        """Parse an SSE stream response into a single text string.
+
+        OmniRoute sometimes ignores ``stream: false`` and replies with
+        ``data: {...}`` lines. Concatenate every ``delta.content`` chunk.
+        """
+        parts: list[str] = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("data:"):
+                continue
+            payload = line[len("data:"):].strip()
+            if not payload or payload == "[DONE]":
+                continue
+            try:
+                chunk = json.loads(payload)
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content")
+                if content:
+                    parts.append(content)
+            except json.JSONDecodeError:
+                continue
+        return "".join(parts).strip()
+
+    async def _post_chat_completions(
+        self,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+    ) -> str:
+        """OmniRoute request with SSE-tolerant response handling."""
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                text = resp.text
+                if text.lstrip().startswith("data:"):
+                    text = self._parse_sse(text)
+                else:
+                    data = resp.json()
+                    text = data["choices"][0]["message"]["content"]
+                return self._strip_watermarks(text)
+        except httpx.TimeoutException as e:
+            logger.error("OmniRoute timeout: %s", e)
+            raise
+        except httpx.HTTPStatusError as e:
+            logger.error("OmniRoute HTTP error: %d - body: %s", e.response.status_code, e.response.text[:300])
+            raise
+        except Exception as e:
+            logger.error("OmniRoute unexpected error: %s", e)
+            raise

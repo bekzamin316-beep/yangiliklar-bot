@@ -28,7 +28,7 @@ class TranslationService:
         if primary:
             self.providers.append(primary)
         backup = self._build_provider(settings.ai_backup_provider or settings.ai_provider)
-        if backup and backup.api_key:
+        if backup and backup.api_key and backup not in self.providers:
             self.providers.append(backup)
 
         # Model used for translation — prefer the first rotation model (which is
@@ -36,6 +36,9 @@ class TranslationService:
         self.models = settings.ai_models_list or [settings.ai_model]
         if self.providers:
             self.providers[0].model = self.models[0]
+        # Backup provider uses its own model (OmniRoute models differ from OpenRouter)
+        if len(self.providers) > 1 and settings.ai_model_backup:
+            self.providers[1].model = settings.ai_model_backup
 
     @staticmethod
     def _build_provider(provider_name: str):

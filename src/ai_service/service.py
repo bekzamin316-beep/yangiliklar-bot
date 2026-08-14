@@ -52,6 +52,8 @@ class AIService:
                 self.backup = OmniRouteProvider()
             else:
                 self.backup = DashScopeProvider()
+            if settings.ai_model_backup:
+                self.backup.model = settings.ai_model_backup
         else:
             self.backup = None
 
@@ -116,6 +118,9 @@ class AIService:
             err_str = str(e)
             # Detect quota exhaustion (403 with "free quota has been exhausted")
             if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
+                self._mark_quota_exhausted(model)
+            # OmniRoute rate limits (429) — skip model for a while to let it recover
+            if "429" in err_str or "rate limit" in err_str.lower():
                 self._mark_quota_exhausted(model)
             logger.warning("Model %s failed: %s", model, err_str[:100])
             return None
@@ -240,6 +245,8 @@ class AIService:
             except Exception as e:
                 err_str = str(e)
                 if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
+                    self._mark_quota_exhausted(try_model)
+                if "429" in err_str or "rate limit" in err_str.lower():
                     self._mark_quota_exhausted(try_model)
                 logger.warning("Digest model %s failed: %s", try_model, err_str[:100])
 
