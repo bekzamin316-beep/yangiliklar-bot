@@ -42,7 +42,7 @@ async def fix_posts() -> dict:
                 )
             else:
                 from datetime import datetime, timedelta, timezone
-                since = datetime.now(timezone.utc) - timedelta(hours=24)
+                since = datetime.now(timezone.utc) - timedelta(hours=96)
                 result = await session.execute(
                     select(News).where(
                         News.is_published.is_(True),
