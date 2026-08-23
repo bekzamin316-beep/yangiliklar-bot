@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     ai_model: str = Field("free", description="AI model name (default, used when no rotation)")
     ai_models: str = Field("", description="Comma-separated models for rotation (e.g. qwen3.5-122b-a10b,qwen-plus,qwen-turbo)")
     ai_rotate_every: int = Field(5, description="Rotate AI model every N processed items (0 = no rotation)")
+    ai_model_daily_limit: int = Field(50, description="Strict daily request limit per AI model (0 = unlimited)")
+    ai_daily_limit_enabled: bool = Field(True, description="Enforce strict per-model daily request limits via Redis")
     dashscope_api_key: str = Field("", description="DashScope API key")
     dashscope_api_base: str = Field(
         "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",

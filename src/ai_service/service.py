@@ -7,6 +7,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import settings
 from src.ai_service.models import NewsAnalysis
+from src.ai_service.rate_limit import ModelDailyLimiter
 from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
 from src.ai_service.translation import TranslationService
 
@@ -67,6 +68,39 @@ class AIService:
         # Track models that hit quota limits — skip them for a while
         self._quota_exhausted: dict[str, int] = {}  # model_name → timestamp when it failed
 
+        # Strict per-model daily rate limiting (free OpenRouter models)
+        self._limiter = ModelDailyLimiter()
+        self._limiter_ready = False
+
+    async def init_rate_limiter(self) -> None:
+        """Initialize the Redis-backed daily rate limiter (call on startup)."""
+        await self._limiter.init()
+        self._limiter_ready = True
+
+    async def close_rate_limiter(self) -> None:
+        """Close the rate limiter's Redis connection."""
+        await self._limiter.aclose()
+        self._limiter_ready = False
+
+    async def _ensure_limiter(self) -> None:
+        """Lazily init the limiter once on first use."""
+        if not self._limiter_ready:
+            await self._limiter.init()
+            self._limiter_ready = True
+
+    async def _daily_limit_ok(self, model: str) -> bool:
+        """True if model is under its strict daily quota."""
+        await self._ensure_limiter()
+        if self._limiter.enabled:
+            return await self._limiter.can_use(model)
+        return True
+
+    async def _record_model_use(self, model: str) -> None:
+        """Increment the model's daily usage counter."""
+        await self._ensure_limiter()
+        if self._limiter.enabled:
+            await self._limiter.record_use(model)
+
     @property
     def models(self) -> list[str]:
         """The configured model rotation chain (public accessor)."""
@@ -107,15 +141,25 @@ class AIService:
 
     async def _try_model(self, model: str, title: str, content: str) -> NewsAnalysis | None:
         """Try a single model for analysis. Returns None if it fails (so we can try next)."""
+        if not await self._daily_limit_ok(model):
+            return None
         try:
             self.primary.model = model
             analysis = await self.primary.analyze_news(title, content)
+            await self._record_model_use(model)
 
             # Post-process: translate any leaked non-Uzbek text and ensure title is set
             analysis = await self._post_process_analysis(analysis, title)
             return analysis
         except Exception as e:
             err_str = str(e)
+            # A 404 "model unavailable for free" means the model slug is wrong /
+            # no longer free — do NOT burn daily quota on it.
+            if "404" in err_str or "unavailable for free" in err_str.lower():
+                logger.warning("Model %s is not available on OpenRouter free tier: %s", model, err_str[:100])
+                return None
+            # Real API attempts (rate limit / quota / 5xx) consume daily budget
+            await self._record_model_use(model)
             # Detect quota exhaustion (403 with "free quota has been exhausted")
             if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
                 self._mark_quota_exhausted(model)
@@ -231,9 +275,13 @@ class AIService:
         fallback_models = self._get_fallback_models(model)
 
         for try_model in [model] + fallback_models:
+            if not await self._daily_limit_ok(try_model):
+                logger.info("Skipping %s — daily limit reached", try_model)
+                continue
             try:
                 self.primary.model = try_model
                 digest_items = await self.primary.generate_digest(news_items)
+                await self._record_model_use(try_model)
 
                 if self.translator:
                     for item in digest_items:
@@ -244,6 +292,11 @@ class AIService:
                 return digest_items
             except Exception as e:
                 err_str = str(e)
+                # Don't burn daily quota on models that aren't available as free
+                if "404" in err_str or "unavailable for free" in err_str.lower():
+                    logger.warning("Digest model %s not available on free tier: %s", try_model, err_str[:100])
+                    continue
+                await self._record_model_use(try_model)
                 if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
                     self._mark_quota_exhausted(try_model)
                 if "429" in err_str or "rate limit" in err_str.lower():
