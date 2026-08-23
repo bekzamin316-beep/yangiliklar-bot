@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     ai_model: str = Field("free", description="AI model name (default, used when no rotation)")
     ai_models: str = Field("", description="Comma-separated models for rotation (e.g. qwen3.5-122b-a10b,qwen-plus,qwen-turbo)")
     ai_rotate_every: int = Field(5, description="Rotate AI model every N processed items (0 = no rotation)")
+    ai_max_fallback_attempts: int = Field(8, description="Max models to try in the fallback chain per article (0 = unlimited)")
     dashscope_api_key: str = Field("", description="DashScope API key")
     dashscope_api_base: str = Field(
         "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",

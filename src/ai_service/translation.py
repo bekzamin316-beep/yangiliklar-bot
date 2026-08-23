@@ -11,6 +11,38 @@ from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Model names that are not suitable for text chat/translation and should be
+# skipped when picking a default translation model.
+_TEXT_UNSUITABLE_MARKERS = (
+    "-vl-",      # vision-language models (expect image input)
+    "-ocr",      # OCR models
+    "qwen-vl",   # vision
+    "qwen-image",
+    "wan2.2",    # image/video generation
+    "-kf2v",
+    "qvq-",      # vision reasoning
+)
+
+
+def _pick_text_model(models: list[str]) -> list[str]:
+    """Reorder ``models`` so the first entry is a plain text chat model.
+
+    The rotation list the admin configures may start with vision/OCR/image
+    models; those fail (or are useless) for pure text translation, so we pick
+    the first text-capable model and leave the rest of the list intact.
+    """
+    if not models:
+        return []
+    text_models = [
+        m for m in models
+        if not any(marker in m.lower() for marker in _TEXT_UNSUITABLE_MARKERS)
+    ]
+    if not text_models:
+        return list(models)
+    head = text_models[0]
+    rest = [m for m in models if m != head]
+    return [head] + rest
+
 
 class TranslationService:
     """Handles translation of AI responses to Uzbek — uses the configured AI provider.
@@ -31,9 +63,9 @@ class TranslationService:
         if backup and backup.api_key and backup not in self.providers:
             self.providers.append(backup)
 
-        # Model used for translation — prefer the first rotation model (which is
-        # what actually works for analysis) over the raw ai_model default.
-        self.models = settings.ai_models_list or [settings.ai_model]
+        # Model used for translation — prefer the first text-capable rotation
+        # model (vision/image/OCR/coder models are useless for text translation).
+        self.models = _pick_text_model(settings.ai_models_list) or [settings.ai_model]
         if self.providers:
             self.providers[0].model = self.models[0]
         # Backup provider uses its own model (OmniRoute models differ from OpenRouter)

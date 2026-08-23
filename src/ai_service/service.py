@@ -1,16 +1,35 @@
 """High-level AI service with retry, model-level fallback, and rotation."""
 
+import html
 import logging
 import time
+from collections.abc import Awaitable, Callable
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from src.core.config import settings
 from src.ai_service.models import NewsAnalysis
 from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
 from src.ai_service.translation import TranslationService
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Module-level admin notifier — registered once at startup (see main.py).
+# Every AIService instance picks it up so failures inside jobs, digests, and
+# admin handlers all reach the same Telegram admin without extra plumbing.
+_admin_notifier: Callable[[str], Awaitable[None]] | None = None
+
+
+def set_admin_notifier(notifier: Callable[[str], Awaitable[None]] | None) -> None:
+    """Register a global async callable used to alert admins about AI issues."""
+    global _admin_notifier
+    _admin_notifier = notifier
+
+
+# Cooldowns — failed models are skipped during rotation for these windows.
+_FAILED_COOLDOWN_SEC = 600      # any failure: 10 minutes
+_QUOTA_COOLDOWN_SEC = 1800      # quota/rate-limit exhausted: 30 minutes
+_NOTIFY_THROTTLE_SEC = 900      # max one admin alert per event per 15 minutes
 
 
 def _needs_translation(text: str | None) -> bool:
@@ -66,44 +85,113 @@ class AIService:
         self._rotate_every = settings.ai_rotate_every
         # Track models that hit quota limits — skip them for a while
         self._quota_exhausted: dict[str, int] = {}  # model_name → timestamp when it failed
+        # Track every failing model so broken/unknown models drop out of rotation fast
+        self._recently_failed: dict[str, int] = {}  # model_name → monotonic timestamp
+        # Throttle admin alerts per event so a 100-item run doesn't spam admins
+        self._last_notify_ts: dict[str, float] = {}
+        self._notifier: Callable[[str], Awaitable[None]] | None = None
+        configured_limit = int(getattr(settings, "ai_max_fallback_attempts", 8) or 0)
+        self._max_fallback_attempts = max(1, configured_limit)
+
+    def set_notifier(self, notifier: Callable[[str], Awaitable[None]] | None) -> None:
+        """Override the instance-level admin notifier (used when a bot is in hand)."""
+        self._notifier = notifier
 
     @property
     def models(self) -> list[str]:
         """The configured model rotation chain (public accessor)."""
         return list(self._models)
 
+    def get_available_models(self) -> list[str]:
+        """Return models that are not currently failed or quota-exhausted.
+
+        Broken or unknown models (bad names, missing on the provider, quota
+        drained) fall out of rotation until their cooldown expires, so the bot
+        stops wasting requests on models that are known to be dead.
+        """
+        now = int(time.monotonic())
+        unavailable = {
+            m for m, ts in self._recently_failed.items() if now - ts < _FAILED_COOLDOWN_SEC
+        }
+        unavailable |= {
+            m for m, ts in self._quota_exhausted.items() if now - ts < _QUOTA_COOLDOWN_SEC
+        }
+        available = [m for m in self._models if m not in unavailable]
+        return available if available else list(self._models)
+
+    async def _notify_admin(self, event: str, text: str, throttle_sec: int = _NOTIFY_THROTTLE_SEC) -> None:
+        """Send a throttled admin notification for an AI event."""
+        notifier = self._notifier or _admin_notifier
+        if notifier is None:
+            return
+        now = time.monotonic()
+        if now - self._last_notify_ts.get(event, 0.0) < throttle_sec:
+            return
+        self._last_notify_ts[event] = now
+        try:
+            await notifier(text)
+        except Exception:
+            logger.exception("Failed to notify admin about AI event %s", event)
+
     def _get_current_model(self) -> str:
-        """Return the current model based on rotation state."""
-        if self._rotate_every > 0 and len(self._models) > 1:
-            idx = (self._process_count // self._rotate_every) % len(self._models)
-            return self._models[idx]
-        return self._models[0]
+        """Return the current model based on rotation state, using healthy models only."""
+        models = self.get_available_models()
+        if self._rotate_every > 0 and len(models) > 1:
+            idx = (self._process_count // self._rotate_every) % len(models)
+            return models[idx]
+        return models[0]
 
     def _get_fallback_models(self, failed_model: str) -> list[str]:
-        """Return models to try as fallback, excluding the failed one and quota-exhausted ones."""
-        candidates = [m for m in self._models if m != failed_model]
-        # Also skip models that recently hit quota limits (within last 30 minutes)
-        now = int(time.monotonic())
-        recent_exhausted = [m for m, ts in self._quota_exhausted.items() if now - ts < 1800]
-        if recent_exhausted:
-            logger.info("Skipping recently quota-exhausted models: %s", recent_exhausted)
-            candidates = [m for m in candidates if m not in recent_exhausted]
+        """Return models to try as fallback, excluding failed/quota-exhausted ones.
+
+        The chain is bounded by ``ai_max_fallback_attempts`` so an article never
+        walks through 100+ models before giving up.
+        """
+        candidates = [m for m in self.get_available_models() if m != failed_model]
+        candidates = candidates[: self._max_fallback_attempts]
         return candidates
+
+    @staticmethod
+    def _is_quota_error(err_str: str) -> bool:
+        """Detect quota/rate-limit exhaustion from an error string."""
+        lowered = err_str.lower()
+        if "403" in err_str and ("quota" in lowered or "exhausted" in lowered):
+            return True
+        if "429" in err_str or "rate limit" in lowered or "quota" in lowered:
+            return True
+        return False
 
     def _mark_quota_exhausted(self, model: str) -> None:
         """Mark a model as quota-exhausted so we skip it for 30 minutes."""
         self._quota_exhausted[model] = int(time.monotonic())
-        logger.warning("Model %s marked as quota-exhausted, skipping for 30 minutes", model)
+        self._recently_failed.pop(model, None)
+        logger.warning("Model %s marked as quota-exhausted, skipping for %d minutes", model, _QUOTA_COOLDOWN_SEC // 60)
+
+    async def _mark_failed(self, model: str, err_str: str) -> None:
+        """Record a model failure and alert the admin when relevant."""
+        now = int(time.monotonic())
+        self._recently_failed[model] = now
+        is_quota = self._is_quota_error(err_str)
+        if is_quota:
+            self._mark_quota_exhausted(model)
+        logger.warning("Model %s failed (%s), skipping for %ds", model, err_str[:80], _FAILED_COOLDOWN_SEC)
+        if is_quota:
+            await self._notify_admin(
+                f"quota:{model}",
+                f"⚠️ <b>AI model limiti tugadi:</b> <code>{html.escape(model, quote=False)}</code>\n"
+                f"<i>{html.escape(err_str[:120], quote=False)}</i>",
+            )
 
     def _advance_rotation(self) -> None:
         """Advance the process counter and rotate model if needed."""
         self._process_count += 1
         if self._rotate_every > 0 and len(self._models) > 1:
-            old_idx = ((self._process_count - 1) // self._rotate_every) % len(self._models)
-            new_idx = (self._process_count // self._rotate_every) % len(self._models)
+            models = self.get_available_models()
+            old_idx = ((self._process_count - 1) // self._rotate_every) % len(models)
+            new_idx = (self._process_count // self._rotate_every) % len(models)
             if old_idx != new_idx:
                 logger.info("Model rotation: %s → %s (item #%d)",
-                            self._models[old_idx], self._models[new_idx], self._process_count)
+                            models[old_idx], models[new_idx], self._process_count)
 
     async def _try_model(self, model: str, title: str, content: str) -> NewsAnalysis | None:
         """Try a single model for analysis. Returns None if it fails (so we can try next)."""
@@ -113,16 +201,13 @@ class AIService:
 
             # Post-process: translate any leaked non-Uzbek text and ensure title is set
             analysis = await self._post_process_analysis(analysis, title)
+            # Model worked — clear any stale failure state so it stays in rotation
+            self._recently_failed.pop(model, None)
+            self._quota_exhausted.pop(model, None)
             return analysis
         except Exception as e:
             err_str = str(e)
-            # Detect quota exhaustion (403 with "free quota has been exhausted")
-            if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
-                self._mark_quota_exhausted(model)
-            # OmniRoute rate limits (429) — skip model for a while to let it recover
-            if "429" in err_str or "rate limit" in err_str.lower():
-                self._mark_quota_exhausted(model)
-            logger.warning("Model %s failed: %s", model, err_str[:100])
+            await self._mark_failed(model, err_str)
             return None
 
     async def _post_process_analysis(self, analysis: NewsAnalysis, original_title: str) -> NewsAnalysis:
@@ -208,6 +293,13 @@ class AIService:
         # Step 4: Minimal analysis with translation fallback
         self._advance_rotation()
         logger.warning("All models failed for: %s — returning minimal analysis", title[:50])
+        await self._notify_admin(
+            "all_models_failed",
+            f"❌ <b>Barcha AI modellar muvaffaqiyatsiz!</b>\n\n"
+            f"📰 <i>{html.escape(title[:80], quote=False)}</i>\n"
+            f"🧠 Ro'yxatdagi modellar: {len(self._models)} ta\n"
+            f"🔑 Tekshiring: API kalit, kvota, provayder holati.",
+        )
         fallback_title = title
         fallback_summary = title
         if self.translator:
@@ -226,7 +318,7 @@ class AIService:
 
     async def create_digest(self, news_items: list[dict]) -> list[dict]:
         """Generate a daily digest with model-level fallback."""
-        # Try each model for digest
+        # Try each healthy model for digest (bounded fallback chain)
         model = self._get_current_model()
         fallback_models = self._get_fallback_models(model)
 
@@ -241,13 +333,13 @@ class AIService:
                         if text and _needs_translation(text):
                             item["text"] = await self.translator.translate_to_uzbek(text)
 
+                # Model worked — clear any stale failure state
+                self._recently_failed.pop(try_model, None)
+                self._quota_exhausted.pop(try_model, None)
                 return digest_items
             except Exception as e:
                 err_str = str(e)
-                if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
-                    self._mark_quota_exhausted(try_model)
-                if "429" in err_str or "rate limit" in err_str.lower():
-                    self._mark_quota_exhausted(try_model)
+                await self._mark_failed(try_model, err_str)
                 logger.warning("Digest model %s failed: %s", try_model, err_str[:100])
 
         # Backup provider
@@ -263,4 +355,9 @@ class AIService:
             except Exception as e2:
                 logger.error("Backup digest also failed: %s", e2)
 
+        await self._notify_admin(
+            "digest_all_models_failed",
+            "❌ <b>Digest yaratishda barcha AI modellar muvaffaqiyatsiz bo'ldi.</b>\n"
+            "🔑 API kalit va kvota holatini tekshiring.",
+        )
         return []

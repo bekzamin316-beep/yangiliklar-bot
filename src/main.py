@@ -16,6 +16,7 @@ from src.news_collector.collector import NewsCollector
 from src.telegram_bot.bot import create_bot, create_dispatcher
 from src.telegram_bot.publisher import Publisher
 from src.scheduler.scheduler import create_scheduler
+from src.ai_service.service import set_admin_notifier
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,9 @@ async def main() -> None:
 
     # 3. Create publisher
     publisher = Publisher(bot)
+
+    # Route AI failure/quota alerts to Telegram admins (used by every AIService)
+    set_admin_notifier(publisher.send_admin_notification)
 
     # 4. Create and start scheduler
     scheduler = create_scheduler(publisher)

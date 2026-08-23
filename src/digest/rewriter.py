@@ -125,7 +125,7 @@ class DigestRewriter:
 
         Returns the raw AI text, or None if every model/provider failed.
         """
-        models = list(self.ai_service.models)
+        models = self.ai_service.get_available_models()
         providers = [self.ai_service.primary]
         if self.ai_service.backup is not None:
             providers.append(self.ai_service.backup)
