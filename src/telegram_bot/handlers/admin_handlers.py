@@ -408,11 +408,13 @@ async def cb_admin_ai(callback: types.CallbackQuery) -> None:
 @admin_router.callback_query(F.data == "admin_ai_provider")
 async def cb_admin_ai_provider(callback: types.CallbackQuery) -> None:
     """Show current AI provider info."""
+    api_key = settings.dashscope_api_key if settings.ai_provider == "dashscope" else settings.openrouter_api_key
+    api_status = "✅ Mavjud" if api_key else "❌ Yo'q"
     text = (
         f"🔧 <b>AI Provayder</b>\n\n"
         f"📡 Joriy: <b>{settings.ai_provider}</b>\n"
         f"🔗 API Base: <code>{settings.dashscope_api_base if settings.ai_provider == 'dashscope' else settings.openrouter_api_base}</code>\n"
-        f"🔑 API Key: <code>{'✅ Mavjud' if (settings.dashscope_api_key if settings.ai_provider == 'dashscope' else settings.openrouter_api_key) else '❌ Yo\'q'}</code>\n\n"
+        f"🔑 API Key: <code>{api_status}</code>\n\n"
         f"ℹ️ Provayder .env faylidan o'zgartiriladi:\n"
         f"<code>AI_PROVIDER=dashscope</code> yoki <code>AI_PROVIDER=openrouter</code>"
     )
@@ -463,10 +465,12 @@ async def cb_admin_ai_prompts(callback: types.CallbackQuery, session) -> None:
     from src.ai_service.prompt_loader import get_analysis_prompt
     current_prompt = get_analysis_prompt()
 
+    translation_status = "✅ Yoqilgan" if settings.enable_translation else "❌ O'chirilgan"
+
     text = (
         "📝 <b>AI Promptlar</b>\n\n"
         f"📊 Tahlil prompti: {'✅ Maxsus' if custom_prompt else '⚡ Standart'}\n"
-        f"🌍 Tarjima: {'✅ Yoqilgan' if settings.enable_translation else '❌ O\'chirilgan'} ({settings.target_language})\n\n"
+        f"🌍 Tarjima: {translation_status} ({settings.target_language})\n\n"
         "💬 Joriy prompt:\n<code>" + current_prompt[:300] + "</code>"
     )
     if custom_prompt:
