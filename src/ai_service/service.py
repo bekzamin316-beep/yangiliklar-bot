@@ -14,15 +14,23 @@ from src.ai_service.translation import TranslationService
 logger = logging.getLogger(__name__)
 
 
+def _has_cyrillic(text: str) -> bool:
+    """Return True when text contains Cyrillic characters (e.g. Russian)."""
+    return any("\u0400" <= ch <= "\u04ff" for ch in text)
+
+
 def _needs_translation(text: str | None) -> bool:
-    """Return True if text looks like English and should be translated.
+    """Return True if text looks like English or Russian and should be translated.
 
     The AI prompts already request Uzbek output, but occasionally Latin-script
-    English leaks through. We detect that cheaply by looking for common English
-    stopwords that do not appear in Uzbek text, avoiding unnecessary API calls.
+    English or Cyrillic Russian leaks through. Cyrillic is detected directly;
+    English is detected cheaply via common stopwords that do not appear in
+    Uzbek text, avoiding unnecessary API calls.
     """
     if not text:
         return False
+    if _has_cyrillic(text):
+        return True
     lowered = text.lower()
     english_markers = {
         "the", "and", "of", "to", "in", "is", "for", "that", "with", "on",
@@ -45,7 +53,8 @@ class AIService:
         else:
             self.primary = DashScopeProvider()
 
-        # Backup provider (if configured)
+        # Backup provider (if configured) — otherwise auto-fallback to DashScope
+        # when its key is set, so a rate-limited primary never blocks the bot.
         if settings.ai_backup_api_key:
             if settings.ai_backup_provider == "openrouter":
                 self.backup = OpenRouterProvider()
@@ -55,6 +64,9 @@ class AIService:
                 self.backup = DashScopeProvider()
             if settings.ai_model_backup:
                 self.backup.model = settings.ai_model_backup
+        elif settings.dashscope_api_key and settings.ai_provider != "dashscope":
+            self.backup = DashScopeProvider()
+            self.backup.model = settings.ai_model_backup or "qwen-plus"
         else:
             self.backup = None
 
@@ -66,7 +78,7 @@ class AIService:
         self._models = settings.ai_models_list
         self._rotate_every = settings.ai_rotate_every
         # Track models that hit quota limits — skip them for a while
-        self._quota_exhausted: dict[str, int] = {}  # model_name → timestamp when it failed
+        self._quota_exhausted: dict[str, tuple[int, int]] = {}  # model → (timestamp, cooldown_seconds)
 
         # Strict per-model daily rate limiting (free OpenRouter models)
         self._limiter = ModelDailyLimiter()
@@ -114,20 +126,20 @@ class AIService:
         return self._models[0]
 
     def _get_fallback_models(self, failed_model: str) -> list[str]:
-        """Return models to try as fallback, excluding the failed one and quota-exhausted ones."""
+        """Return models to try as fallback, excluding the failed one and unavailable ones."""
         candidates = [m for m in self._models if m != failed_model]
-        # Also skip models that recently hit quota limits (within last 30 minutes)
+        # Also skip models recently marked unavailable (quota exhausted, rate limited)
         now = int(time.monotonic())
-        recent_exhausted = [m for m, ts in self._quota_exhausted.items() if now - ts < 1800]
-        if recent_exhausted:
-            logger.info("Skipping recently quota-exhausted models: %s", recent_exhausted)
-            candidates = [m for m in candidates if m not in recent_exhausted]
+        recent_unavailable = [m for m, (ts, cooldown) in self._quota_exhausted.items() if now - ts < cooldown]
+        if recent_unavailable:
+            logger.info("Skipping recently unavailable models: %s", recent_unavailable)
+            candidates = [m for m in candidates if m not in recent_unavailable]
         return candidates
 
-    def _mark_quota_exhausted(self, model: str) -> None:
-        """Mark a model as quota-exhausted so we skip it for 30 minutes."""
-        self._quota_exhausted[model] = int(time.monotonic())
-        logger.warning("Model %s marked as quota-exhausted, skipping for 30 minutes", model)
+    def _mark_quota_exhausted(self, model: str, cooldown: int = 1800) -> None:
+        """Mark a model as temporarily unavailable so it's skipped for ``cooldown`` seconds."""
+        self._quota_exhausted[model] = (int(time.monotonic()), cooldown)
+        logger.warning("Model %s marked as unavailable, skipping for %ds", model, cooldown)
 
     def _advance_rotation(self) -> None:
         """Advance the process counter and rotate model if needed."""
@@ -163,9 +175,9 @@ class AIService:
             # Detect quota exhaustion (403 with "free quota has been exhausted")
             if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
                 self._mark_quota_exhausted(model)
-            # OmniRoute rate limits (429) — skip model for a while to let it recover
+            # OmniRoute rate limits (429) — rate limits reset in ~1 minute
             if "429" in err_str or "rate limit" in err_str.lower():
-                self._mark_quota_exhausted(model)
+                self._mark_quota_exhausted(model, cooldown=90)
             logger.warning("Model %s failed: %s", model, err_str[:100])
             return None
 
@@ -300,7 +312,7 @@ class AIService:
                 if "403" in err_str and ("quota" in err_str.lower() or "exhausted" in err_str.lower()):
                     self._mark_quota_exhausted(try_model)
                 if "429" in err_str or "rate limit" in err_str.lower():
-                    self._mark_quota_exhausted(try_model)
+                    self._mark_quota_exhausted(try_model, cooldown=90)
                 logger.warning("Digest model %s failed: %s", try_model, err_str[:100])
 
         # Backup provider

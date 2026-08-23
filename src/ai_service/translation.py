@@ -1,9 +1,6 @@
 """Translation utilities for AI responses."""
 
 import logging
-import time
-
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.ai_service.prompt_loader import load_prompt
 from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
@@ -15,73 +12,84 @@ logger = logging.getLogger(__name__)
 class TranslationService:
     """Handles translation of AI responses to Uzbek — uses the configured AI provider.
 
-    The provider and model are chosen to mirror the analysis chain, and the
-    translation request falls back across providers (primary → backup) so a
-    single dead model/key can never silently break translations again.
+    The provider and model chain mirrors the analysis chain: primary → backup →
+    any other provider that has valid credentials (e.g. DashScope when OpenRouter
+    is rate-limited). Each provider tries its model(s) in turn, so a single
+    dead/rate-limited model or key can never silently break translations again.
     """
 
     def __init__(self):
-        # Build provider chain in the same order the analysis service uses,
-        # skipping providers that lack credentials.
-        self.providers: list = []
-        primary = self._build_provider(settings.ai_provider)
-        if primary:
-            self.providers.append(primary)
-        backup = self._build_provider(settings.ai_backup_provider or settings.ai_provider)
-        if backup and backup.api_key and backup not in self.providers:
-            self.providers.append(backup)
+        # Order of preference: configured primary → configured backup → any
+        # other provider with valid credentials. Providers without a key are
+        # skipped, and duplicates are collapsed.
+        names = [settings.ai_provider]
+        if settings.ai_backup_provider and settings.ai_backup_provider not in names:
+            names.append(settings.ai_backup_provider)
+        for candidate in ("dashscope", "openrouter"):
+            if candidate not in names:
+                names.append(candidate)
+        # OmniRoute is self-hosted with optional auth — only auto-add it when
+        # explicitly keyed, so a dead/unconfigured router never adds latency.
+        if settings.omniroute_api_key and "omniroute" not in names:
+            names.append("omniroute")
 
-        # Model used for translation — prefer the first rotation model (which is
-        # what actually works for analysis) over the raw ai_model default.
-        self.models = settings.ai_models_list or [settings.ai_model]
-        if self.providers:
-            self.providers[0].model = self.models[0]
-        # Backup provider uses its own model (OmniRoute models differ from OpenRouter)
-        if len(self.providers) > 1 and settings.ai_model_backup:
-            self.providers[1].model = settings.ai_model_backup
+        self.providers: list = []
+        for name in names:
+            provider = self._build_provider(name)
+            if provider and all(type(p) is not type(provider) for p in self.providers):
+                self.providers.append(provider)
 
     @staticmethod
     def _build_provider(provider_name: str):
-        """Instantiate a provider by name, or None when not configured."""
+        """Instantiate a provider by name, or None when it lacks credentials."""
         if provider_name == "openrouter":
-            p = OpenRouterProvider()
-        elif provider_name == "omniroute":
-            p = OmniRouteProvider()
-        elif provider_name == "dashscope":
-            p = DashScopeProvider()
-        else:
-            return None
-        return p if p.api_key else None
+            if not settings.openrouter_api_key:
+                return None
+            return OpenRouterProvider()
+        if provider_name == "omniroute":
+            return OmniRouteProvider()
+        if provider_name == "dashscope":
+            if not settings.dashscope_api_key:
+                return None
+            return DashScopeProvider()
+        return None
 
-    @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(multiplier=2, min=4, max=30),
-        retry=retry_if_exception_type(Exception),
-        reraise=False,
-    )
+    @staticmethod
+    def _models_for(provider) -> list[str]:
+        """Return the model(s) to try for a given provider."""
+        if isinstance(provider, DashScopeProvider):
+            return [settings.ai_model_backup or "qwen-plus"]
+        if isinstance(provider, OmniRouteProvider):
+            return [settings.ai_model_backup or settings.ai_model]
+        return settings.ai_models_list or [settings.ai_model]
+
     async def translate_to_uzbek(self, text: str) -> str:
         """Translate text from any language to Uzbek using AI.
 
-        Falls back across the configured providers. Returns the original text
-        when every provider fails so the caller never crashes.
+        Falls back across the configured providers and models. Returns the
+        original text when every provider fails so the caller never crashes.
         """
         if not text.strip():
             return text
 
-        prompt = load_prompt("translate").format(text=text)
+        # Use replace() instead of .format() so translated text containing
+        # braces (e.g. JSON, code) never crashes the prompt builder.
+        prompt = load_prompt("translate").replace("{text}", text)
         system = "Siz professional tarjimon. Barcha tarjimalar o'zbek tilida (Lotin alifbosi) bo'lishi shart."
 
         for i, provider in enumerate(self.providers):
-            try:
-                translated = await provider.generate(prompt, system=system)
-                result = translated.strip()
-                if result:
-                    return result
-            except Exception as e:
-                logger.warning(
-                    "Translation provider %d/%d failed: %s",
-                    i + 1, len(self.providers), e,
-                )
+            for model in self._models_for(provider):
+                try:
+                    provider.model = model
+                    translated = await provider.generate(prompt, system=system)
+                    result = translated.strip()
+                    if result:
+                        return result
+                except Exception as e:
+                    logger.warning(
+                        "Translation provider %d/%d (%s, model %s) failed: %s",
+                        i + 1, len(self.providers), type(provider).__name__, model, e,
+                    )
 
         logger.error("All translation providers failed for text: %s", text[:80])
         return text

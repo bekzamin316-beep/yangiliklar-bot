@@ -166,8 +166,8 @@ class BaseAIProvider:
             raise
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
-                logger.warning("AI rate limit hit, waiting 15s before retry...")
-                await asyncio.sleep(15)
+                logger.warning("AI rate limit hit, waiting 5s before retry...")
+                await asyncio.sleep(5)
                 try:
                     async with httpx.AsyncClient(timeout=self.timeout) as client:
                         resp = await client.post(url, headers=headers, json=payload)
