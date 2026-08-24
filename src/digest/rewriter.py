@@ -201,6 +201,7 @@ class DigestRewriter:
             "source_name": str(item.get("source_name", "") or "").strip(),
             "published_at": item.get("published_at", ""),
             "importance": int(item.get("importance", 50) or 50),
+            "image_url": str(item.get("image_url", "") or "").strip(),
         }
 
     def _fallback_item(self, item: dict) -> dict:
@@ -241,6 +242,7 @@ class DigestRewriter:
             "source_name": str(item.get("source_name", "") or "").strip(),
             "published_at": item.get("published_at", ""),
             "importance": int(item.get("importance", 50) or 50),
+            "image_url": str(item.get("image_url", "") or "").strip(),
         }
 
     # ── Parsing (reuse shared logic from the AI provider) ─────

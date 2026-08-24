@@ -157,6 +157,22 @@ class TelegraphDigestService:
         try:
             source_contents = await fetcher.fetch_all_sources(news_items)
 
+            # Prefer images captured from RSS (media:content / enclosure);
+            # fall back to extracting og:image from the article page.
+            images: dict[int, str] = {}
+            missing_img = []
+            for item in news_items:
+                rss_img = (getattr(item, "image_url", None) or "").strip()
+                if rss_img.startswith("http"):
+                    images[item.id] = rss_img
+                else:
+                    missing_img.append(item)
+            if missing_img:
+                try:
+                    images.update(await fetcher.fetch_all_images(missing_img))
+                except Exception as e:
+                    logger.warning("Image extraction failed (continuing without): %s", e)
+
             rewrite_items = []
             for item in news_items:
                 content = source_contents.get(item.id, "") or (item.summary or item.analysis or "")
@@ -170,6 +186,7 @@ class TelegraphDigestService:
                     "source_name": item.source_name or "",
                     "published_at": published_at,
                     "importance": item.importance_score,
+                    "image_url": images.get(item.id, ""),
                     "fallback": {
                         "title_uz": item.title,
                         "summary_uz": item.summary or item.title,
@@ -329,6 +346,14 @@ class TelegraphDigestService:
             "sleek financial dashboard aesthetic, high contrast, cinematic lighting, 4k"
         )
 
+    @staticmethod
+    def _md_bold_html(text: str) -> str:
+        """Escape HTML but convert **bold** markers to <b> tags."""
+        import re
+
+        escaped = esc(text or "")
+        return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped)
+
     def _build_page_html(self, items: list[dict], footer: dict) -> str:
         """Build the full Telegraph page HTML (all news + market/footer summary)."""
         parts: list[str] = []
@@ -336,7 +361,10 @@ class TelegraphDigestService:
 
         for idx, item in enumerate(items, start=1):
             emoji = _SENTIMENT_EMOJI.get(item.get("sentiment", "neutral"), "⚪️")
+            image_url = (item.get("image_url") or "").strip()
             parts.append(f"<h3>{idx}. {esc(item.get('title_uz'))}</h3>")
+            if image_url.startswith("http"):
+                parts.append(f'<img src="{esc(image_url)}" alt="{esc(item.get("title_uz"))}"/>')
             parts.append(f"<p><b>📋 Xulosa:</b> {esc(item.get('summary_uz'))}</p>")
             if item.get("commentary_uz"):
                 parts.append(f"<p><b>📝 Batafsil sharh:</b> {esc(item.get('commentary_uz'))}</p>")
@@ -366,15 +394,28 @@ class TelegraphDigestService:
 
             parts.append("<p>──────</p>")
 
-        # Footer: market summary + overall AI summary
+        # Footer: market summary + overall AI summary + outlook
         market_summary = (footer.get("market_summary") or "").strip()
         overall_summary = (footer.get("overall_summary") or "").strip()
+        outlook = (footer.get("outlook_uz") or "").strip()
 
         parts.append("<h2>📊 Bozor xulosasi</h2>")
-        parts.append(f"<p>{esc(market_summary) if market_summary else 'Bozor xulosasi mavjud emas.'}</p>")
+        if market_summary:
+            parts.append(f"<p>{self._md_bold_html(market_summary)}</p>")
+        else:
+            parts.append("<p>Bozor xulosasi mavjud emas.</p>")
 
         parts.append("<h2>🤖 Umumiy AI xulosa</h2>")
-        parts.append(f"<p>{esc(overall_summary) if overall_summary else 'Umumiy xulosa mavjud emas.'}</p>")
+        if overall_summary:
+            parts.append(f"<p>{self._md_bold_html(overall_summary)}</p>")
+        else:
+            parts.append("<p>Umumiy xulosa mavjud emas.</p>")
+
+        parts.append("<h2>🔎 Kelgusi kunlarda nazar</h2>")
+        if outlook:
+            parts.append(f"<p>{self._md_bold_html(outlook)}</p>")
+        else:
+            parts.append("<p>Kelgusi kunlarga tahlil mavjud emas.</p>")
 
         parts.append("<p><i>Ushbu digest AI tomonidan avtomatik tayyorlandi va investitsiya tavsiyasi emas.</i></p>")
         return "\n".join(parts)

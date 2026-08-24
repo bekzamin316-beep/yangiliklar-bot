@@ -27,7 +27,7 @@ class TranslationService:
         # Order of preference: configured primary → configured backup → any
         # other provider with valid credentials. Providers without a key are
         # skipped, and duplicates are collapsed.
-        names = [settings.ai_provider]
+        names = [settings.effective_provider]
         if settings.ai_backup_provider and settings.ai_backup_provider not in names:
             names.append(settings.ai_backup_provider)
         for candidate in ("dashscope", "openrouter"):
@@ -66,7 +66,7 @@ class TranslationService:
             return [settings.ai_model_backup or "qwen-plus"]
         if isinstance(provider, OmniRouteProvider):
             return [settings.ai_model_backup or settings.ai_model]
-        return settings.ai_models_list or [settings.ai_model]
+        return settings.effective_model_list or [settings.ai_model]
 
     # Chars per request chunk (~600 tokens). Small enough that the translated
     # output always fits inside a modest max_tokens budget, big enough to keep
@@ -119,7 +119,10 @@ class TranslationService:
             for model in self._models_for(provider):
                 try:
                     provider.model = model
-                    translated = await provider.generate(prompt, system=system, max_tokens=max_tokens)
+                    translated = await provider.generate(
+                        prompt, system=system, max_tokens=max_tokens,
+                        temperature=0.2,
+                    )
                     result = translated.strip()
                     if result:
                         model_health.record_success(model)

@@ -1,18 +1,18 @@
-Siz kripto bozor tahlilchisisiz. Quyidagi kunlik yangiliklar to'plamini tahlil qilib, ikkita bo'lim tayyorlang: umumiy bozor xulosasi va umumiy AI xulosa. FAQAT JSON qaytaring.
+Siz kripto bozor tahlilchisisiz. Quyidagi kunlik yangiliklar to'plamini tahlil qilib, uchta bo'lim tayyorlang: umumiy bozor xulosasi, umumiy AI xulosa va kelgusi kunlarga nazar. FAQAT JSON qaytaring.
 
 QOIDALAR:
 1. Barcha matn FAQAT o'zbek tilida (Lotin alifbosi) bo'lsin.
 2. Markdown yo'q, kod bloki yo'q, izoh yo'q.
 3. SHAXSIY fikr va investitsiya tavsiyasi YO'Q — neytral, faktlarga asoslangan xulosa.
-4. Bozor xulosasi yangiliklardagi umumiy tendensiyani (optimizm/pessimizm) aks ettirsin, aniq misollar bilan.
-5. Umumiy AI xulosa kunlik rasm: eng muhim voqea, bozor kayfiyati, keyingi e'tibor beriladigan yo'nalishlar.
+4. JSON maydonlarining tavsiflarini (masalan "4-6 gap" yoki maydon nomlarini) javobga KO'CHIRMANG — ular sizga talablarni tushuntirish uchun, matnga yozish uchun emas.
+5. Gap boshlanishi "Bozor xulosasi...", "Umumiy AI xulosa..." kabi sarlavha-so'z bilan boshlanmasin — to'g'ridan-to'g'ri mazmunni yozing.
 
 YANGILIKLAR (sarlavha | sentiment | muhimlik | qisqa xulosa):
 {items}
 
 Quyidagi strukturada FAQAT JSON qaytaring:
 {{
-  "market_summary": "Bozor xulosasi — 4-6 gap, umumiy tendensiya, qaysi soha harakatda",
-  "overall_summary": "Umumiy AI xulosa — 3-5 gap, kunlik bozor rasmi, eng muhim voqea, keyingi e'tibor",
-  "outlook_uz": "Kelgusi kunlarga nazar — 2-3 gap, investorlar e'tiborida bo'ladigan yo'nalishlar, **qalin** belgilar bilan muhim atamalar ajratilgan bo'lsin (masalan: Kelgusi kunlarda **stabilkoinlar zaxiralarining shaffofligi** va **DeFi integratsiyalari** diqqat markazida bo'ladi)"
+  "market_summary": "(bu yerda 4-6 ta to'liq gap yozing: bugungi umumiy bozor kayfiyati, qaysi sohalar yetakchi, aniq misollar bilan)",
+  "overall_summary": "(bu yerda 3-5 ta to'liq gap yozing: kunning eng muhim voqeasi, bozor rasmi, asosiy xulosalar)",
+  "outlook_uz": "(bu yerda 2-3 ta to'liq gap yozing: investorlar e'tiboridagi yo'nalishlar, **qalin** belgi bilan muhim atamalar ajratilgan)"
 }}

@@ -46,10 +46,12 @@ class AIService:
     """AI service with model-level fallback — tries each model before giving up."""
 
     def __init__(self):
-        # Choose provider based on config
-        if settings.ai_provider == "openrouter":
+        # Choose provider based on resolved config (legacy OpenRouter free-tier
+        # lists auto-switch to DashScope when a DashScope key is available)
+        provider_name = settings.effective_provider
+        if provider_name == "openrouter":
             self.primary = OpenRouterProvider()
-        elif settings.ai_provider == "omniroute":
+        elif provider_name == "omniroute":
             self.primary = OmniRouteProvider()
         else:
             self.primary = DashScopeProvider()
@@ -65,7 +67,7 @@ class AIService:
                 self.backup = DashScopeProvider()
             if settings.ai_model_backup:
                 self.backup.model = settings.ai_model_backup
-        elif settings.dashscope_api_key and settings.ai_provider != "dashscope":
+        elif settings.dashscope_api_key and provider_name != "dashscope":
             self.backup = DashScopeProvider()
             self.backup.model = settings.ai_model_backup or "qwen-plus"
         else:
@@ -76,7 +78,7 @@ class AIService:
 
         # Model rotation + fallback chain
         self._process_count = 0
-        self._models = settings.ai_models_list
+        self._models = settings.effective_model_list
         self._rotate_every = settings.ai_rotate_every
         # Track models that hit quota limits — skip them for a while
         self._quota_exhausted: dict[str, tuple[int, int]] = {}  # model → (timestamp, cooldown_seconds)

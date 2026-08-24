@@ -93,7 +93,7 @@ class BaseAIProvider:
     # ------------------------------------------------------------------
     # Shared HTTP layer
     # ------------------------------------------------------------------
-    async def generate(self, prompt: str, system: str | None = None, max_tokens: int | None = None, json_mode: bool = False) -> str:
+    async def generate(self, prompt: str, system: str | None = None, max_tokens: int | None = None, json_mode: bool = False, temperature: float = 0.7) -> str:
         """Send a prompt to the provider and return the AI's text response.
 
         Args:
@@ -102,6 +102,8 @@ class BaseAIProvider:
             max_tokens: Override the default token limit (defaults to 1024).
             json_mode: When True, request strict JSON output via
                 ``response_format`` (OpenAI-compatible providers).
+            temperature: Sampling temperature (lower = more faithful — use
+                ~0.2 for translation tasks).
         """
         messages: list[dict[str, Any]] = []
         # qwen-mt (machine translation) models only accept 'user'/'assistant'
@@ -117,7 +119,7 @@ class BaseAIProvider:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": 0.7,
+            "temperature": temperature,
             "max_tokens": max_tokens or 1024,
             **self._extra_payload(),
         }

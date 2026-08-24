@@ -131,6 +131,56 @@ class ContentFetcher:
 
     # ── Web articles ────────────────────────────────────────
 
+    async def fetch_image_url(self, url: str) -> str:
+        """Extract the main article image URL from a web page.
+
+        Checks og:image, twitter:image, then the first <img> inside the
+        article. Returns "" when nothing suitable is found.
+        """
+        if not url or self._parse_telegram_link(url):
+            return ""
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(12), follow_redirects=True) as client:
+                resp = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"})
+                if resp.status_code >= 400:
+                    return ""
+                soup = BeautifulSoup(resp.text, "html.parser")
+        except Exception as e:
+            logger.debug("Image fetch skipped for %s: %s", url[:80], e)
+            return ""
+
+        for prop in ("og:image", "og:image:secure_url", "twitter:image", "twitter:image:src"):
+            tag = soup.find("meta", attrs={"property": prop}) or soup.find("meta", attrs={"name": prop})
+            if tag and tag.get("content"):
+                img = tag["content"].strip()
+                if img.startswith("http"):
+                    return img
+
+        img_tag = soup.find("img", src=True)
+        if img_tag:
+            src = img_tag["src"].strip()
+            if src.startswith("//"):
+                return f"https:{src}"
+            if src.startswith("http"):
+                return src
+        return ""
+
+    async def fetch_all_images(self, news_items: list) -> dict[int, str]:
+        """Extract the lead image URL for each news item's source page.
+
+        Returns dict: {news_id: image_url}
+        """
+        results: dict[int, str] = {}
+        for item in news_items:
+            source_url = getattr(item, "source_url", None)
+            if not source_url:
+                continue
+            image = await self.fetch_image_url(source_url)
+            if image:
+                results[item.id] = image
+        logger.info("Extracted %d/%d article images", len(results), len(news_items))
+        return results
+
     async def fetch_web_article(self, url: str) -> str:
         """Fetch and extract main text from a web article URL."""
         try:

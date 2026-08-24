@@ -418,7 +418,7 @@ async def cb_admin_ai_models(callback: types.CallbackQuery) -> None:
         pass
 
     try:
-        results = await probe_all(settings.ai_models_list)
+        results = await probe_all(settings.effective_model_list)
     except Exception as e:
         logger.error("Model probe failed: %s", e, exc_info=True)
         await callback.message.edit_text(
@@ -436,7 +436,7 @@ async def cb_admin_ai_models(callback: types.CallbackQuery) -> None:
         f"🔧 Ishlayotgan: <b>{ok_count} / {total}</b>",
         "",
     ]
-    for model in settings.ai_models_list:
+    for model in settings.effective_model_list:
         ok, msg = results.get(model, (False, "Tekshirilmadi"))
         if ok:
             lines.append(f"  ✅ {model}")

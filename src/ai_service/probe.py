@@ -20,10 +20,11 @@ PROBE_TIMEOUT = 25
 
 
 def _build_provider():
-    """Instantiate the provider matching the configured AI_PROVIDER."""
-    if settings.ai_provider == "openrouter":
+    """Instantiate the provider matching the resolved AI_PROVIDER."""
+    provider = settings.effective_provider
+    if provider == "openrouter":
         return OpenRouterProvider()
-    if settings.ai_provider == "omniroute":
+    if provider == "omniroute":
         return OmniRouteProvider()
     return DashScopeProvider()
 
