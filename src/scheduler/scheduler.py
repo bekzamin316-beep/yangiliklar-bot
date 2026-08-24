@@ -8,7 +8,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.core.config import settings
-from src.scheduler.jobs import collect_news, generate_telegraph_digest, update_live_prices
+from src.scheduler.jobs import collect_and_publish_news, collect_news, generate_telegraph_digest, update_live_prices
 from src.telegram_bot.publisher import Publisher
 
 logger = logging.getLogger(__name__)
@@ -72,26 +72,49 @@ def _configure_digest_jobs(scheduler: AsyncIOScheduler, publisher: Publisher, sc
 def create_scheduler(publisher: Publisher) -> AsyncIOScheduler:
     """Create and configure the APScheduler instance.
 
-    Jobs:
-    1. collect_news — every NEWS_CHECK_INTERVAL seconds (24/7, no publishing)
-    2. update_live_prices — every LIVE_PRICE_INTERVAL seconds (default 60s)
-    3. generate_telegraph_digest — at each digest schedule time (default 08:00, 12:00, 18:00, 22:00)
+    Publishing mode is controlled by PUBLISH_MODE:
+
+    - ``instant`` (default): collect_and_publish_news — every news item is
+      analyzed and sent to the channel as soon as it is collected. No digests.
+    - ``digest``: collect_news 24/7 (saved to DB, no publishing) + a
+      generate_telegraph_digest cron job per scheduled time (default
+      08:00, 12:00, 18:00, 22:00).
+
+    Live prices job runs in both modes.
     """
     global _scheduler
 
     scheduler = AsyncIOScheduler(timezone=settings.digest_timezone)
+    mode = (settings.publish_mode or "instant").strip().lower()
+    if mode not in ("instant", "digest"):
+        logger.warning("Unknown PUBLISH_MODE %r — falling back to 'instant'", settings.publish_mode)
+        mode = "instant"
 
-    # Job 1: Collect news periodically (saved to DB, picked up by digests)
-    scheduler.add_job(
-        collect_news,
-        trigger=IntervalTrigger(seconds=settings.news_check_interval),
-        id="collect_news",
-        name="Collect news (24/7)",
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        next_run_time=datetime.now(),
-    )
+    if mode == "digest":
+        # Job 1: Collect news periodically (saved to DB, picked up by digests)
+        scheduler.add_job(
+            collect_news,
+            trigger=IntervalTrigger(seconds=settings.news_check_interval),
+            id="collect_news",
+            name="Collect news (24/7)",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(),
+        )
+    else:
+        # Job 1: Collect + publish each item immediately to the channel
+        scheduler.add_job(
+            collect_and_publish_news,
+            trigger=IntervalTrigger(seconds=settings.news_check_interval),
+            args=[publisher],
+            id="collect_and_publish",
+            name="Collect and publish news",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(),
+        )
 
     # Job 2: Update live prices (pinned message)
     live_price_interval = getattr(settings, 'live_price_interval', 60)
@@ -104,22 +127,30 @@ def create_scheduler(publisher: Publisher) -> AsyncIOScheduler:
         max_instances=1,
     )
 
-    # Job 3: Generate Telegraph digest at each scheduled time
-    try:
-        schedule_times = list(getattr(settings, "digest_schedule_list", _DEFAULT_TIMES))
-    except Exception:
-        schedule_times = list(_DEFAULT_TIMES)
-    _configure_digest_jobs(scheduler, publisher, schedule_times)
+    # Job 3: Generate Telegraph digest at each scheduled time (digest mode only)
+    if mode == "digest":
+        try:
+            schedule_times = list(getattr(settings, "digest_schedule_list", _DEFAULT_TIMES))
+        except Exception:
+            schedule_times = list(_DEFAULT_TIMES)
+        _configure_digest_jobs(scheduler, publisher, schedule_times)
 
     _scheduler = scheduler
 
-    logger.info(
-        "Scheduler configured: news every %ds, live prices every %ds, digest at %s (%s)",
-        settings.news_check_interval,
-        live_price_interval,
-        ", ".join(schedule_times),
-        settings.digest_timezone,
-    )
+    if mode == "digest":
+        logger.info(
+            "Scheduler configured (digest): news every %ds, live prices every %ds, digest at %s (%s)",
+            settings.news_check_interval,
+            live_price_interval,
+            ", ".join(schedule_times),
+            settings.digest_timezone,
+        )
+    else:
+        logger.info(
+            "Scheduler configured (instant): news every %ds, live prices every %ds — publishing immediately, no digests",
+            settings.news_check_interval,
+            live_price_interval,
+        )
 
     return scheduler
 

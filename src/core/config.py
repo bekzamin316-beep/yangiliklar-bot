@@ -106,6 +106,10 @@ class Settings(BaseSettings):
     # Scheduler
     news_check_interval: int = Field(300, description="Seconds between news checks")
     live_price_interval: int = Field(60, description="Seconds between live price updates (default 60)")
+    publish_mode: str = Field(
+        "instant",
+        description="Publishing mode: 'instant' = publish each news as soon as collected, 'digest' = accumulate and send 4x/day Telegraph digests",
+    )
     digest_hour: int = Field(0, description="Hour for daily digest (legacy single-time setting)")
     digest_minute: int = Field(0, description="Minute for daily digest (legacy single-time setting)")
     digest_timezone: str = Field("Asia/Tashkent", description="Timezone for digest")
