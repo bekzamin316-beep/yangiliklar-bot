@@ -184,19 +184,33 @@ class Settings(BaseSettings):
         return models if models else [self.ai_model]
 
     @cached_property
+    def _rotation_shape(self) -> tuple[bool, bool]:
+        """(legacy_free, foreign_slugs) shape flags of the configured rotation.
+
+        legacy_free — every slug looks like ``vendor/model:free`` (dead OpenRouter
+        free-tier list). foreign_slugs — no slug contains ``/`` at all, meaning
+        they cannot be OpenRouter models (DashScope-style slugs).
+        """
+        models = self.ai_models_list
+        if not models:
+            return False, False
+        legacy = all("/" in m and ":free" in m for m in models)
+        foreign = all("/" not in m for m in models)
+        return legacy, foreign
+
+    @cached_property
     def effective_provider(self) -> str:
         """Provider actually usable with the current credentials.
 
-        When the configured provider is OpenRouter but its rotation is still a
-        legacy free-tier list (all slugs look like ``vendor/model:free`` — those
-        endpoints now return 404) or the key is missing, fall back to DashScope
-        whenever a DashScope key exists, so a stale env var can't keep the bot
-        on a dead provider.
+        When OpenRouter is configured but its rotation is a dead legacy free-tier
+        list, or consists of non-OpenRouter slugs, or the key is missing — fall
+        back to DashScope whenever a DashScope key exists, so a stale env var
+        can't keep the bot on a broken provider.
         """
         if self.ai_provider == "openrouter":
-            models = self.ai_models_list
-            looks_legacy = bool(models) and all("/" in m and ":free" in m for m in models)
-            if (looks_legacy or not self.openrouter_api_key) and self.dashscope_api_key:
+            legacy, foreign = self._rotation_shape
+            incompatible = legacy or foreign or not self.openrouter_api_key
+            if incompatible and self.dashscope_api_key:
                 return "dashscope"
         return self.ai_provider
 
@@ -204,10 +218,14 @@ class Settings(BaseSettings):
     def effective_model_list(self) -> List[str]:
         """Model rotation that matches :attr:`effective_provider`.
 
-        Returns the built-in DashScope rotation when the legacy OpenRouter list
-        was swapped for DashScope; otherwise returns the configured rotation.
+        Keeps the configured slugs when they are already DashScope-shaped;
+        swaps in the built-in DashScope rotation only for dead legacy lists.
         """
         if self.effective_provider == "dashscope" and self.ai_provider != "dashscope":
+            legacy, _ = self._rotation_shape
+            models = self.ai_models_list
+            if models and not legacy:
+                return models
             return [m.strip() for m in DEFAULT_ROTATION_MODELS.split(",") if m.strip()]
         return self.ai_models_list
 

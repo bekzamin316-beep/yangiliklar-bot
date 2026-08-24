@@ -429,13 +429,25 @@ async def cb_admin_ai_models(callback: types.CallbackQuery) -> None:
 
     total = len(results)
     ok_count = sum(1 for ok, _ in results.values() if ok)
+    unauth_count = sum(1 for ok, msg in results.values() if not ok and "401" in msg)
+
+    provider = settings.effective_provider
+    key_present = bool(
+        settings.dashscope_api_key if provider == "dashscope"
+        else settings.openrouter_api_key or settings.omniroute_api_key
+    )
+    key_label = "✅" if key_present else "❌ yo'q"
 
     lines = [
         "📊 <b>AI Modellar Holati</b>",
         "━━━━━━━━━━━━━━━━━━━━━━",
         f"🔧 Ishlayotgan: <b>{ok_count} / {total}</b>",
-        "",
+        f"📡 Provayder: <b>{provider}</b> | 🔑 Kalit: {key_label}",
     ]
+    if unauth_count >= max(3, total // 4):
+        key_name = "DASHSCOPE_API_KEY" if provider == "dashscope" else "OPENROUTER_API_KEY"
+        lines.append(f"⚠️ <b>{unauth_count} ta model 401 qaytardi — {key_name} noto'g'ri/eskirgan!</b>")
+    lines.append("")
     for model in settings.effective_model_list:
         ok, msg = results.get(model, (False, "Tekshirilmadi"))
         if ok:
