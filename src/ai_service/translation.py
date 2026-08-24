@@ -61,9 +61,20 @@ class TranslationService:
 
     @staticmethod
     def _models_for(provider) -> list[str]:
-        """Return the model(s) to try for a given provider."""
+        """Return the model(s) to try for a given provider.
+
+        DashScope walks the full configured rotation (configured backup model
+        first, when set) so translation shares the same resilience as analysis.
+        """
         if isinstance(provider, DashScopeProvider):
-            return [settings.ai_model_backup or "qwen-plus"]
+            chain: list[str] = []
+            backup = (settings.ai_model_backup or "").strip()
+            if backup:
+                chain.append(backup)
+            for m in settings.effective_model_list:
+                if m and m not in chain:
+                    chain.append(m)
+            return chain or ["qwen-plus"]
         if isinstance(provider, OmniRouteProvider):
             return [settings.ai_model_backup or settings.ai_model]
         return settings.effective_model_list or [settings.ai_model]

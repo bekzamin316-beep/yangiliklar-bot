@@ -33,7 +33,10 @@ DEFAULT_ROTATION_MODELS = (
     "qwen3.6-flash,qwen3.5-flash,deepseek-v4-pro,deepseek-v4-flash,qwen3-coder-next,"
     "kimi-k2.7-code,glm-5.2,glm-5.1,qwen3-next-80b-a3b-instruct,"
     "qwen3-coder-480b-a35b-instruct,qwen-plus,qwen-turbo,"
-    "qwen3-coder-flash-2025-07-28,deepseek-v3.2"
+    "qwen3-coder-flash-2025-07-28,deepseek-v3.2,"
+    "qwen-mt-plus,qwen-mt-turbo,qwen-mt-flash,qwen-mt-lite,"
+    "qwen-vl-ocr,qwen-vl-ocr-2025-11-20,qvq-max,wan2.2-kf2v-flash,"
+    "qwen-plus-character,qwen-flash-character"
 )
 
 
