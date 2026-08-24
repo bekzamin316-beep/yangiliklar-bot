@@ -338,10 +338,20 @@ class BaseAIProvider:
 class DashScopeProvider(BaseAIProvider):
     """DashScope Qwen API provider (OpenAI-compatible)."""
 
+    # Learned at runtime: when a call gets 401 on one region, the provider
+    # retries the other region and remembers the working one for the rest
+    # of the process (Singapore keys must use the -intl endpoint, China
+    # keys the mainland one — a mismatch always returns "Incorrect API key").
+    REGION_CN = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    REGION_INTL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    region_override: str | None = None
+
     def __init__(self) -> None:
         super().__init__()
         self._api_base = settings.dashscope_api_base
         self._api_key = settings.dashscope_api_key
+        if DashScopeProvider.region_override:
+            self._api_base = DashScopeProvider.region_override
 
     @property
     def api_base(self) -> str:
@@ -350,6 +360,31 @@ class DashScopeProvider(BaseAIProvider):
     @property
     def api_key(self) -> str:
         return self._api_key
+
+    def _other_region(self) -> str | None:
+        if "intl." in self._api_base:
+            return self.REGION_CN
+        if "//dashscope.aliyuncs.com" in self._api_base:
+            return self.REGION_INTL
+        return None
+
+    async def generate(self, prompt: str, system: str | None = None, max_tokens: int | None = None, json_mode: bool = False, temperature: float = 0.7) -> str:
+        """Generate with automatic cross-region retry on auth errors."""
+        try:
+            return await super().generate(prompt, system=system, max_tokens=max_tokens, json_mode=json_mode, temperature=temperature)
+        except Exception as e:
+            if "401" not in str(e):
+                raise
+            alt = self._other_region()
+            if not alt or alt == self._api_base:
+                raise
+            logger.warning(
+                "DashScope 401 via %s — retrying via %s (region/key mismatch)",
+                self._api_base, alt,
+            )
+            self._api_base = alt
+            type(self).region_override = alt
+            return await super().generate(prompt, system=system, max_tokens=max_tokens, json_mode=json_mode, temperature=temperature)
 
     def _extra_payload(self) -> dict[str, Any]:
         # Qwen3 reasoning models consume output tokens on chain-of-thought by
