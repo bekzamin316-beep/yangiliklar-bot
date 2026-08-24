@@ -6,6 +6,7 @@ import time
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import settings
+from src.ai_service import model_health
 from src.ai_service.models import NewsAnalysis
 from src.ai_service.rate_limit import ModelDailyLimiter
 from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
@@ -139,6 +140,7 @@ class AIService:
     def _mark_quota_exhausted(self, model: str, cooldown: int = 1800) -> None:
         """Mark a model as temporarily unavailable so it's skipped for ``cooldown`` seconds."""
         self._quota_exhausted[model] = (int(time.monotonic()), cooldown)
+        model_health.mark_cooldown(model, cooldown)
         logger.warning("Model %s marked as unavailable, skipping for %ds", model, cooldown)
 
     def _advance_rotation(self) -> None:
@@ -162,9 +164,11 @@ class AIService:
 
             # Post-process: translate any leaked non-Uzbek text and ensure title is set
             analysis = await self._post_process_analysis(analysis, title)
+            model_health.record_success(model)
             return analysis
         except Exception as e:
             err_str = str(e)
+            model_health.record_error(model, err_str)
             # A 404 "model unavailable for free" means the model slug is wrong /
             # no longer free — do NOT burn daily quota on it.
             if "404" in err_str or "unavailable for free" in err_str.lower():

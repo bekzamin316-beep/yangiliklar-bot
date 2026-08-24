@@ -3,6 +3,7 @@
 import logging
 import re
 
+from src.ai_service import model_health
 from src.ai_service.prompt_loader import load_prompt
 from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
 from src.core.config import settings
@@ -121,8 +122,10 @@ class TranslationService:
                     translated = await provider.generate(prompt, system=system, max_tokens=max_tokens)
                     result = translated.strip()
                     if result:
+                        model_health.record_success(model)
                         return result
                 except Exception as e:
+                    model_health.record_error(model, str(e))
                     logger.warning(
                         "Translation provider %d/%d (%s, model %s) failed: %s",
                         i + 1, len(self.providers), type(provider).__name__, model, e,

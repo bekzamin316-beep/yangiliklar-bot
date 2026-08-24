@@ -72,13 +72,23 @@ def get_source_detail_keyboard(source_id: int, is_active: bool) -> InlineKeyboar
 def get_admin_ai_keyboard() -> InlineKeyboardBuilder:
     """Admin AI settings submenu."""
     kb = InlineKeyboardBuilder()
+    kb.button(text="🩺 Model holati", callback_data="admin_ai_models")
     kb.button(text="🔧 Provayder", callback_data="admin_ai_provider")
     kb.button(text="🧠 Model", callback_data="admin_ai_model")
     kb.button(text="📝 Promptlar", callback_data="admin_ai_prompts")
     kb.button(text="✏️ Prompt o'zgartirish", callback_data="admin_ai_prompt_edit")
     kb.button(text="🧪 Test", callback_data="admin_ai_test")
     kb.button(text="🔙 Orqaga", callback_data="admin_main")
-    kb.adjust(2, 2, 2)
+    kb.adjust(1, 2, 2, 1)
+    return kb
+
+
+def get_model_status_keyboard() -> InlineKeyboardBuilder:
+    """Keyboard for the model health screen."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Yangilash", callback_data="admin_ai_models")
+    kb.button(text="🔙 Orqaga", callback_data="admin_ai")
+    kb.adjust(2)
     return kb
 
 

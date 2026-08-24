@@ -88,6 +88,20 @@ class ModelDailyLimiter:
             logger.warning("Failed to read daily count for %s: %s", model, e)
             return 0
 
+    async def get_counts(self, models: list[str]) -> dict[str, int]:
+        """Return today's request counts for many models in one Redis round-trip."""
+        if not self.enabled or self._redis is None or not models:
+            return {m: 0 for m in models}
+        try:
+            async with self._redis.pipeline(transaction=False) as pipe:
+                for m in models:
+                    pipe.get(self._key(m))
+                values = await pipe.execute()
+            return {m: int(v or 0) for m, v in zip(models, values)}
+        except Exception as e:
+            logger.warning("Failed to read daily counts batch: %s", e)
+            return {m: 0 for m in models}
+
     async def can_use(self, model: str) -> bool:
         """True if the model still has daily quota left."""
         if not self.enabled or self._redis is None:
