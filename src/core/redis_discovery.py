@@ -59,7 +59,9 @@ async def discover() -> tuple[str, object] | None:
         if not ip:
             logger.info("No project Redis on the private network — using in-memory fallback")
             return None
-        url = f"redis://{ip}:{_redis_port}/0"
+        # Bracket IPv6 addresses so the redis URL parses correctly
+        host_part = f"[{ip}]" if ":" in ip else ip
+        url = f"redis://{host_part}:{_redis_port}/0"
 
     client = None
     try:
