@@ -131,6 +131,11 @@ async def main() -> None:
     scheduler.start()
     logger.info("Scheduler started")
 
+    # 4.5 Health server + self-ping (keeps always-on hosts from idling out)
+    from src.webserver import start_health_server, self_ping_loop
+    health_runner = await start_health_server()
+    ping_task = asyncio.create_task(self_ping_loop())
+
     # 5. Run startup actions
     await on_startup(bot, publisher)
 
@@ -141,6 +146,8 @@ async def main() -> None:
     except (KeyboardInterrupt, SystemExit):
         logger.info("Shutdown signal received")
     finally:
+        ping_task.cancel()
+        await health_runner.cleanup()
         await on_shutdown(bot, scheduler)
 
 

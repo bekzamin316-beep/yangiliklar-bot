@@ -13,5 +13,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY pyproject.toml .
 
+# Always-on hosts (HF Spaces) reach the app on this port
+EXPOSE 7860
+
 # Run
 CMD ["python", "-m", "src.main"]
