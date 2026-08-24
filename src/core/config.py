@@ -28,9 +28,35 @@ class Settings(BaseSettings):
     redis_url: str = Field("redis://localhost:6379/0", description="Redis URL")
 
     # AI
-    ai_provider: str = Field("openrouter", description="Primary AI provider name")
-    ai_model: str = Field("free", description="AI model name (default, used when no rotation)")
-    ai_models: str = Field("", description="Comma-separated models for rotation (e.g. qwen3.5-122b-a10b,qwen-plus,qwen-turbo)")
+    ai_provider: str = Field("dashscope", description="Primary AI provider name")
+    ai_model: str = Field("qwen-plus", description="AI model name (default, used when no rotation)")
+    ai_models: str = Field(
+        "qwen3.5-122b-a10b,qwen3.7-plus,qwen3-vl-235b-a22b-thinking,qwen3-vl-32b-thinking,"
+        "qwen-plus-2025-07-28,qwen3-max,qwen3.5-plus-2026-02-15,qwen-max,"
+        "qwen3-vl-30b-a3b-thinking,qwen3-235b-a22b-thinking-2507,qwen3.7-max-2026-06-08,"
+        "qwen3.7-max-preview,qwen3.6-max-preview,qwen3-32b,deepseek-v4-pro-0813,"
+        "qwen3.5-397b-a17b,qwen3-vl-plus-2025-09-23,qwen-vl-plus,qwen3.8-27b,"
+        "qwen3.7-flash-2026-07-15,qwen3-vl-32b-instruct,qwen3.5-35b-a3b,"
+        "qwen3-30b-a3b-thinking-2507,qwen3-coder-plus-2025-09-23,qwen-plus-latest,"
+        "qwen3-max-2026-01-23,qwen3-vl-8b-thinking,qwen3-coder-plus,qwen-plus-2025-09-11,"
+        "qwen3-vl-flash-2026-01-22,deepseek-v4-flash-0731,qwen3-max-preview,"
+        "qwen3-vl-flash-2025-10-15,qwen3.5-flash-2026-02-23,qwen-vl-max,"
+        "qwen3.7-max-2026-05-20,qwen3-vl-30b-a3b-instruct,qwen3.7-plus-2026-05-26,"
+        "qwen3.8-2.4t-a95b,qwen3-coder-30b-a3b-instruct,qwen3-vl-235b-a22b-instruct,"
+        "qwen3-8b,qwen3.6-27b,qwen3-235b-a22b,kimi-k3,qwen3.6-flash-2026-04-16,"
+        "qwen3-coder-flash,qwen3-vl-plus,qwen3-next-80b-a3b-thinking,qwen3.5-27b,"
+        "qwen3.7-max-2026-05-17,qwen3-30b-a3b,qwen3-vl-flash,qwen3-14b,"
+        "qwen3-vl-8b-instruct,qwen3-max-2025-09-23,qwen3-vl-plus-2025-12-19,"
+        "qwen-plus-2025-04-28,qwen3-30b-a3b-instruct-2507,qwen3.5-plus,qwen-flash,"
+        "qwen3.7-flash,qwen-flash-2025-07-28,qwen3.6-35b-a3b,qwen-plus-2025-07-14,"
+        "qwen3-235b-a22b-instruct-2507,qwq-plus,qwen3.6-plus-2026-04-02,"
+        "qwen3-coder-plus-2025-07-22,qwen3.5-plus-2026-04-20,qwen3.8-max,qwen3.6-plus,"
+        "qwen3.6-flash,qwen3.5-flash,deepseek-v4-pro,deepseek-v4-flash,qwen3-coder-next,"
+        "kimi-k2.7-code,glm-5.2,glm-5.1,qwen3-next-80b-a3b-instruct,"
+        "qwen3-coder-480b-a35b-instruct,qwen-plus,qwen-turbo,"
+        "qwen3-coder-flash-2025-07-28,deepseek-v3.2",
+        description="Comma-separated models for rotation (e.g. qwen3.5-122b-a10b,qwen-plus,qwen-turbo)",
+    )
     ai_rotate_every: int = Field(5, description="Rotate AI model every N processed items (0 = no rotation)")
     ai_model_daily_limit: int = Field(50, description="Strict daily request limit per AI model (0 = unlimited)")
     ai_daily_limit_enabled: bool = Field(True, description="Enforce strict per-model daily request limits via Redis")
@@ -60,7 +86,7 @@ class Settings(BaseSettings):
 
     ai_backup_provider: str = Field("", description="Backup AI provider name")
     ai_backup_api_key: str = Field("", description="Backup AI API key")
-    ai_model_backup: str = Field("", description="Model used by the backup provider (e.g. omniroute model)")
+    ai_model_backup: str = Field("qwen-plus", description="Model used by the backup provider (e.g. omniroute model)")
     fix_digest_url: str = Field("", description="Explicit telegra.ph URL for the FIX_DIGEST one-off retranslate")
 
     # Translation
