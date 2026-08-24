@@ -1,0 +1,12 @@
+# Render.com Blueprint — kartasiz bepul deploy
+# Yangi Web Service yaratishda "Blueprint" ni tanlang yoki ushbu fayl repoda bo'lsa avtomatik ishlatiladi.
+services:
+  - type: web
+    name: crypto-news-bot
+    runtime: python
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m src.main
+    healthCheckPath: /health
+    autoDeploy: true

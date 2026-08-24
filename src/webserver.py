@@ -17,7 +17,7 @@ from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-PING_INTERVAL_SECONDS = 900  # 15 min — far below any platform idle timeout
+PING_INTERVAL_SECONDS = int(os.environ.get("PING_INTERVAL_SECONDS", "600"))  # 10 min < Render's 15-min idle cutoff
 
 
 async def health_handler(request: web.Request) -> web.Response:
