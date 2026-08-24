@@ -1,7 +1,6 @@
 """Admin panel handlers — full admin management."""
 
 import logging
-import time
 
 from aiogram import F, Router, types
 from aiogram.enums import ParseMode
@@ -409,86 +408,63 @@ async def cb_admin_ai(callback: types.CallbackQuery) -> None:
 
 @admin_router.callback_query(F.data == "admin_ai_models")
 async def cb_admin_ai_models(callback: types.CallbackQuery) -> None:
-    """Show per-model health: daily limits, cooldowns, and recent errors."""
-    from datetime import datetime, timezone
+    """Live-check every rotation model and list each one's status."""
+    from src.ai_service.probe import probe_all
 
-    from src.ai_service import model_health
-    from src.ai_service.rate_limit import ModelDailyLimiter
+    await callback.answer("🔍 Barcha modellar tekshirilmoqda...")
+    try:
+        await callback.message.edit_text("⏳ Modellar tekshirilmoqda — bu 20-60 soniya olishi mumkin...")
+    except Exception:
+        pass
 
-    await callback.answer("🩺 Model holati tekshirilmoqda...")
+    try:
+        results = await probe_all(settings.ai_models_list)
+    except Exception as e:
+        logger.error("Model probe failed: %s", e, exc_info=True)
+        await callback.message.edit_text(
+            f"❌ Tekshiruv xatosi: <code>{str(e)[:200]}</code>",
+            reply_markup=get_model_status_keyboard().as_markup(),
+        )
+        return
 
-    rotation = settings.ai_models_list
-    limiter = ModelDailyLimiter()
-    await limiter.init()
-    counts = await limiter.get_counts(rotation)
-    limit_enabled = limiter.enabled and limiter.daily_limit > 0
-    daily_limit = limiter.daily_limit
+    total = len(results)
+    ok_count = sum(1 for ok, _ in results.values() if ok)
 
-    key_status = "✅" if (
-        settings.dashscope_api_key if settings.ai_provider == "dashscope"
-        else settings.openrouter_api_key or settings.omniroute_api_key
-    ) else "❌ yo'q"
-
-    problems: list[str] = []
-    active_ok: list[str] = []
-    idle = 0
-
-    now_wall = time.time()
-    for model in rotation:
-        used = counts.get(model, 0)
-        err = model_health.get_error(model)
-        cooldown_left = model_health.get_cooldown_remaining(model)
-        over_limit = limit_enabled and used >= daily_limit
-
-        if err and err.get("last"):
-            ago_s = max(0, int(now_wall - err.get("wall", 0)))
-            if ago_s < 60:
-                ago = f"{ago_s}s oldin"
-            elif ago_s < 3600:
-                ago = f"{ago_s // 60} daq oldin"
-            else:
-                ago = f"{ago_s // 3600} soat oldin"
-            problems.append(
-                f"❌ <code>{model}</code> — {err['count']} xato ({ago})\n"
-                f"   ⚠️ {err['last'][:120]}"
-            )
-        elif cooldown_left > 0:
-            mins = cooldown_left // 60
-            problems.append(f"⏳ <code>{model}</code> — vaqtincha o'chirilgan (~{mins} daqiqa)")
-        elif over_limit:
-            problems.append(f"⛔ <code>{model}</code> — kunlik limit tugagan ({used}/{daily_limit})")
-        elif used > 0:
-            active_ok.append(f"✅ <code>{model}</code> — {used}/{daily_limit} so'rov")
-        elif model_health.was_successful(model):
-            active_ok.append(f"✅ <code>{model}</code> — ishlagan (bugun {used})")
-        else:
-            idle += 1
-
-    parts = [
-        f"🩺 <b>AI Modellar holati</b>\n\n"
-        f"📡 Provayder: <b>{settings.ai_provider}</b> | 🔑 Kalit: {key_status}\n"
-        f"🔄 Rotatsiya: <b>{len(rotation)}</b> ta model"
-        + (f" | 📊 Limit: {daily_limit}/kun" if limit_enabled else " | 📊 Limit: o'chirilgan")
+    lines = [
+        "📊 <b>AI Modellar Holati</b>",
+        "━━━━━━━━━━━━━━━━━━━━━━",
+        f"🔧 Ishlayotgan: <b>{ok_count} / {total}</b>",
+        "",
     ]
+    for model in settings.ai_models_list:
+        ok, msg = results.get(model, (False, "Tekshirilmadi"))
+        if ok:
+            lines.append(f"  ✅ {model}")
+        else:
+            lines.append(f"  ❌ {model} — {msg}")
 
-    if problems:
-        parts.append("\n⚠️ <b>Muammolar:</b>\n" + "\n".join(problems[:12]))
-        if len(problems) > 12:
-            parts.append(f"<i>…va yana {len(problems) - 12} ta muammo</i>")
-    else:
-        parts.append("\n✅ <b>Muammo aniqlanmadi</b>")
+    header_len = len(lines[0]) + len(lines[1]) + len(lines[2]) + len(lines[3]) + 4
+    chunks: list[str] = []
+    current: list[str] = []
+    size = header_len
+    for line in lines:
+        line_len = len(line) + 1
+        if current and size + line_len > 3800:
+            chunks.append("\n".join(current))
+            current = [line]
+            size = line_len
+        else:
+            current.append(line)
+            size += line_len
+    if current:
+        chunks.append("\n".join(current))
 
-    if active_ok:
-        parts.append("\n📈 <b>Bugun ishlatilganlar:</b>\n" + "\n".join(active_ok[:15]))
-        if len(active_ok) > 15:
-            parts.append(f"<i>…va yana {len(active_ok) - 15} ta</i>")
-
-    parts.append(f"\n😴 Bugun ishlatilmagan: <b>{idle}</b> ta model")
-
-    text = "\n".join(parts)
-    if len(text) > 4000:
-        text = text[:3990] + "…"
-    await callback.message.edit_text(text, reply_markup=get_model_status_keyboard().as_markup())
+    for i, chunk in enumerate(chunks):
+        markup = get_model_status_keyboard().as_markup() if i == len(chunks) - 1 else None
+        if i == 0:
+            await callback.message.edit_text(chunk, reply_markup=markup)
+        else:
+            await callback.message.answer(chunk, reply_markup=markup)
 
 
 @admin_router.callback_query(F.data == "admin_ai_provider")
