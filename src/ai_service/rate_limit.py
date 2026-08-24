@@ -52,15 +52,19 @@ class ModelDailyLimiter:
             logger.warning("redis package not installed — daily rate limit disabled")
             self.enabled = False
             return
+        from src.core import redis_discovery
+
+        pair = await redis_discovery.discover()
+        url = (pair[0] if pair else None) or settings.redis_url
         try:
             self._redis = aioredis.from_url(
-                settings.redis_url,
+                url,
                 decode_responses=True,
                 socket_connect_timeout=3,
                 socket_timeout=3,
             )
             await self._redis.ping()
-            logger.info("ModelDailyLimiter connected to Redis (limit=%d req/day)", self.daily_limit)
+            logger.info("ModelDailyLimiter connected to Redis at %s (limit=%d req/day)", url, self.daily_limit)
         except Exception as e:
             logger.warning("Redis unavailable (%s) — daily rate limit disabled", e)
             self.enabled = False

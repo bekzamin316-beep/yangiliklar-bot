@@ -119,7 +119,9 @@ async def main() -> None:
 
     # 2. Create bot and dispatcher
     bot = create_bot()
-    dp = await create_dispatcher()
+    from src.core.redis_discovery import discover as discover_redis
+    redis_pair = await discover_redis()
+    dp = await create_dispatcher(redis_pair[1] if redis_pair else None)
 
     # 3. Create publisher
     publisher = Publisher(bot)
