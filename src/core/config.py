@@ -125,6 +125,27 @@ class Settings(BaseSettings):
         description="Comma-separated digest send times in HH:MM (24h), e.g. 08:00,12:00,18:00,22:00",
     )
 
+    # Economic calendar (weekly channel post)
+    economic_calendar_enabled: bool = Field(True, description="Enable the weekly economic calendar post")
+    calendar_post_day: str = Field("sunday", description="Weekday name for the weekly calendar post (e.g. sunday)")
+    calendar_post_time: str = Field("20:00", description="Time HH:MM for the weekly calendar post")
+    calendar_min_impact: str = Field("Medium", description="Minimum event impact to include: Low, Medium or High")
+    calendar_api_url: str = Field(
+        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+        description="Economic calendar JSON source URL (ForexFactory weekly feed)",
+    )
+
+    # Weekly top token unlocks (channel post, after the economic calendar)
+    token_unlocks_enabled: bool = Field(True, description="Enable the weekly top token unlocks post")
+    unlocks_post_day: str = Field("sunday", description="Weekday name for the weekly unlocks post (e.g. sunday)")
+    unlocks_post_time: str = Field("20:15", description="Time HH:MM for the weekly unlocks post")
+    unlocks_top_n: int = Field(10, description="Number of biggest unlocks to list")
+    unlocks_max_pages: int = Field(6, description="Max listing pages to fetch (100 items per page)")
+    unlocks_api_url: str = Field(
+        "https://api.coinmarketcap.com/data-api/v3/token-unlock/listing",
+        description="CoinMarketCap data-api token unlock listing URL",
+    )
+
     # Telegraph (digest pages)
     telegraph_api_base: str = Field("https://api.telegra.ph", description="Telegraph API base URL")
     telegraph_short_name: str = Field("CryptoNews", description="Telegraph account short name")

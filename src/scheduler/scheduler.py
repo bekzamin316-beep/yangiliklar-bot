@@ -8,7 +8,14 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src.core.config import settings
-from src.scheduler.jobs import collect_and_publish_news, collect_news, generate_telegraph_digest, update_live_prices
+from src.scheduler.jobs import (
+    collect_and_publish_news,
+    collect_news,
+    generate_telegraph_digest,
+    send_economic_calendar,
+    send_token_unlocks,
+    update_live_prices,
+)
 from src.telegram_bot.publisher import Publisher
 
 logger = logging.getLogger(__name__)
@@ -134,6 +141,45 @@ def create_scheduler(publisher: Publisher) -> AsyncIOScheduler:
         except Exception:
             schedule_times = list(_DEFAULT_TIMES)
         _configure_digest_jobs(scheduler, publisher, schedule_times)
+
+    # Job 4: Weekly economic calendar post
+    if settings.economic_calendar_enabled:
+        try:
+            day = (settings.calendar_post_day or "sunday").strip().lower()
+            time_parts = (settings.calendar_post_time or "20:00").split(":")
+            cal_hour, cal_minute = int(time_parts[0]), int(time_parts[1])
+            scheduler.add_job(
+                send_economic_calendar,
+                trigger=CronTrigger(day_of_week=day, hour=str(cal_hour), minute=str(cal_minute),
+                                    timezone=settings.digest_timezone),
+                args=[publisher],
+                id="economic_calendar",
+                name="Weekly economic calendar",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        except Exception as e:
+            logger.error("Failed to schedule economic calendar: %s", e)
+
+    # Job 5: Weekly top token unlocks post
+    if getattr(settings, "token_unlocks_enabled", True):
+        try:
+            u_day = (settings.unlocks_post_day or "sunday").strip().lower()
+            u_parts = (settings.unlocks_post_time or "20:15").split(":")
+            scheduler.add_job(
+                send_token_unlocks,
+                trigger=CronTrigger(day_of_week=u_day, hour=str(int(u_parts[0])),
+                                    minute=str(int(u_parts[1])), timezone=settings.digest_timezone),
+                args=[publisher],
+                id="token_unlocks",
+                name="Weekly top token unlocks",
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        except Exception as e:
+            logger.error("Failed to schedule token unlocks: %s", e)
 
     _scheduler = scheduler
 

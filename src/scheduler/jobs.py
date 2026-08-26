@@ -328,3 +328,87 @@ async def update_live_prices() -> None:
         await live_service.create_or_update_pinned_message()
     except Exception as e:
         logger.error("Error updating live prices: %s", e)
+
+
+# Retry window for the weekly Sunday posts: external sources may lag behind
+# over the weekend or rate-limit us, so empty results are retried hourly.
+_CALENDAR_RETRY_SECONDS = 60 * 60
+_CALENDAR_MAX_RETRIES = 24
+
+
+async def _send_parts_with_retry(
+    publisher: Publisher,
+    label: str,
+    build,
+) -> None:
+    """Build channel post parts with hourly retries, then publish them.
+
+    ``build`` is a zero-arg callable returning a list of HTML strings; an
+    empty result or a raised exception both trigger the next retry attempt.
+    """
+    parts: list[str] = []
+    for attempt in range(_CALENDAR_MAX_RETRIES + 1):
+        try:
+            parts = await build()
+        except Exception as e:
+            # Transient failures (rate limits, network) are retried too
+            logger.warning(
+                "%s attempt %d/%d failed: %s",
+                label, attempt + 1, _CALENDAR_MAX_RETRIES + 1, e,
+            )
+            parts = []
+        if parts:
+            break
+        if attempt < _CALENDAR_MAX_RETRIES:
+            logger.warning(
+                "%s: data not available yet (attempt %d/%d) — retrying in %ds",
+                label, attempt + 1, _CALENDAR_MAX_RETRIES, _CALENDAR_RETRY_SECONDS,
+            )
+            await asyncio.sleep(_CALENDAR_RETRY_SECONDS)
+
+    if not parts:
+        await publisher.send_admin_notification(
+            f"{label}: ⚠️ <b>yuborilmadi</b> — manba hali yangi hafta ma'lumotini bermadi."
+        )
+        logger.error("%s: giving up after %d retries", label, _CALENDAR_MAX_RETRIES)
+        return
+
+    sent = 0
+    for i, part in enumerate(parts):
+        if i > 0:
+            await asyncio.sleep(1.5)
+        if await publisher.publish_digest(part):
+            sent += 1
+        else:
+            break
+    await publisher.send_admin_notification(
+        f"{label}: ✅ <b>yuborildi</b> ({sent}/{len(parts)} xabar)"
+    )
+    logger.info("%s published: %d/%d messages", label, sent, len(parts))
+
+
+async def send_economic_calendar(publisher: Publisher) -> None:
+    """Scheduler job: post next week's economic calendar to the channel.
+
+    Runs on ``calendar_post_day`` (default Sunday evening).
+    """
+    from src.calendar_service.service import EconomicCalendarService
+
+    service = EconomicCalendarService()
+    await _send_parts_with_retry(
+        publisher, "🗓 Haftalik iqtisodiy kalendar", service.build_weekly_message,
+    )
+
+
+async def send_token_unlocks(publisher: Publisher) -> None:
+    """Scheduler job: post next week's top token unlocks to the channel.
+
+    Runs on ``unlocks_post_day``/``unlocks_post_time`` (default Sunday 20:15,
+    right after the economic calendar). No AI translation needed.
+    """
+    from src.unlocks_service.service import TokenUnlocksService
+
+    service = TokenUnlocksService()
+    await _send_parts_with_retry(
+        publisher, "🔓 Haftalik token unlock reytingi", service.build_weekly_message,
+    )
