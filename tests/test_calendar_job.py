@@ -9,9 +9,14 @@ class FakePublisher:
     def __init__(self):
         self.published: list[str] = []
         self.notifications: list[str] = []
+        self.photos: list[tuple[bytes, str]] = []
 
     async def publish_digest(self, text: str) -> bool:
         self.published.append(text)
+        return True
+
+    async def publish_photo(self, photo_bytes: bytes, caption: str = "") -> bool:
+        self.photos.append((photo_bytes, caption))
         return True
 
     async def send_admin_notification(self, text: str) -> None:

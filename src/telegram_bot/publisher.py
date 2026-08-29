@@ -85,6 +85,26 @@ class Publisher:
             logger.error("Failed to publish digest: %s", e)
             return False
 
+    async def publish_photo(self, photo_bytes: bytes, caption: str = "") -> bool:
+        """Publish a photo (PNG bytes) to the channel with an optional caption.
+
+        Caption may contain HTML formatting (parse_mode=HTML).
+        """
+        from aiogram.types import BufferedInputFile
+
+        try:
+            msg = await self.bot.send_photo(
+                chat_id=self.channel_id,
+                photo=BufferedInputFile(photo_bytes, filename="unlocks_chart.png"),
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+            logger.info("Published photo (msg_id=%d)", msg.message_id)
+            return True
+        except Exception as e:
+            logger.error("Failed to publish photo: %s", e)
+            return False
+
     async def publish_digest_message(
         self,
         title: str,

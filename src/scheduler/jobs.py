@@ -343,20 +343,28 @@ async def _send_parts_with_retry(
 ) -> None:
     """Build channel post parts with hourly retries, then publish them.
 
-    ``build`` is a zero-arg callable returning a list of HTML strings; an
-    empty result or a raised exception both trigger the next retry attempt.
+    ``build`` is a zero-arg callable returning either a list of HTML strings
+    (text-only) or a ``(parts, photo_bytes)`` tuple. An empty result or a
+    raised exception both trigger the next retry attempt. When photo bytes are
+    returned the photo is sent first with the first text part as its caption,
+    followed by the remaining parts.
     """
     parts: list[str] = []
+    photo: bytes | None = None
     for attempt in range(_CALENDAR_MAX_RETRIES + 1):
         try:
-            parts = await build()
+            built = await build()
+            if isinstance(built, tuple):
+                parts, photo = built
+            else:
+                parts, photo = built, None
         except Exception as e:
             # Transient failures (rate limits, network) are retried too
             logger.warning(
                 "%s attempt %d/%d failed: %s",
                 label, attempt + 1, _CALENDAR_MAX_RETRIES + 1, e,
             )
-            parts = []
+            parts, photo = [], None
         if parts:
             break
         if attempt < _CALENDAR_MAX_RETRIES:
@@ -374,15 +382,22 @@ async def _send_parts_with_retry(
         return
 
     sent = 0
+    if photo:
+        caption = parts[0][:1000]
+        if await publisher.publish_photo(photo, caption):
+            sent += 1
+            parts = parts[1:]
+        else:
+            logger.warning("%s: photo send failed — falling back to text", label)
     for i, part in enumerate(parts):
-        if i > 0:
+        if i > 0 or sent > 0:
             await asyncio.sleep(1.5)
         if await publisher.publish_digest(part):
             sent += 1
         else:
             break
     await publisher.send_admin_notification(
-        f"{label}: ✅ <b>yuborildi</b> ({sent}/{len(parts)} xabar)"
+        f"{label}: ✅ <b>yuborildi</b> ({sent}/{len(parts) + (1 if photo else 0)} xabar)"
     )
     logger.info("%s published: %d/%d messages", label, sent, len(parts))
 
@@ -404,11 +419,13 @@ async def send_token_unlocks(publisher: Publisher) -> None:
     """Scheduler job: post next week's top token unlocks to the channel.
 
     Runs on ``unlocks_post_day``/``unlocks_post_time`` (default Sunday 20:15,
-    right after the economic calendar). No AI translation needed.
+    right after the economic calendar). A rendered PNG bar chart is sent first,
+    followed by the text listing. No AI translation needed.
     """
     from src.unlocks_service.service import TokenUnlocksService
 
     service = TokenUnlocksService()
     await _send_parts_with_retry(
-        publisher, "🔓 Haftalik token unlock reytingi", service.build_weekly_message,
+        publisher, "🔓 Haftalik token unlock reytingi",
+        service.build_weekly_message_with_chart_async,
     )

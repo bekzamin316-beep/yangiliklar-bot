@@ -22,6 +22,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import settings
+from src.unlocks_service.chart import render_unlocks_chart
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,48 @@ class TokenUnlocksService:
         blocks.append("🔗 Manba: CoinMarketCap")
         return self._split_message(blocks)
 
+    def build_weekly_message_with_chart(
+        self, items: list[dict], *, now: datetime | None = None,
+    ) -> tuple[list[str], bytes | None]:
+        """Build message parts plus a PNG chart of the top unlocks.
+
+        Returns ``(parts, chart_bytes)``; ``chart_bytes`` is ``None`` when there
+        are no events or rendering fails, in which case the text-only fallback
+        is used by the caller.
+        """
+        events = self._filter_upcoming_week(items, now=now)
+        if not events:
+            logger.warning("Unlocks: no events in the upcoming week — nothing to send")
+            return [], None
+
+        top_n = getattr(settings, "unlocks_top_n", 10)
+        ref = now or datetime.now(LOCAL_TZ)
+        days_ahead = (7 - ref.weekday()) % 7 or 7
+        week_start = (ref + timedelta(days=days_ahead)).replace(hour=0, minute=0, second=0, microsecond=0)
+        week_end = week_start + timedelta(days=7)
+
+        blocks = [
+            f"🔓 <b>TOP-{min(top_n, len(events))} QULFDAN OCHILADIGAN TOKENLAR — "
+            f"{_week_range_str(week_start, week_end - timedelta(days=1))}</b>",
+        ]
+        for rank, ev in enumerate(events[:top_n], 1):
+            blocks.append(self._event_line(rank, ev))
+
+        total_usd = sum(
+            (e.get("nextUnlocked") or {}).get("tokenAmountUsd") or 0 for e in events
+        )
+        blocks.append(f"💰 <b>Jami haftalik unlock:</b> ≈{_fmt_usd(total_usd)}")
+        blocks.append("🔗 Manba: CoinMarketCap")
+
+        chart = render_unlocks_chart(events, now=now)
+        return self._split_message(blocks), chart
+
     async def build_weekly_message(self) -> list[str]:
         """Build one or more HTML posts for the upcoming week's biggest unlocks."""
         items = await self.fetch_events()
         return self.build_weekly_message_sync_items(items)
+
+    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], bytes | None]:
+        """Fetch events and build message parts plus a PNG chart."""
+        items = await self.fetch_events()
+        return self.build_weekly_message_with_chart(items)

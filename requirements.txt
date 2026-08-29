@@ -19,3 +19,4 @@ tenacity>=8.2.0
 psutil>=5.9.0
 telethon>=1.36.0
 beautifulsoup4>=4.12.0
+matplotlib>=3.8.0

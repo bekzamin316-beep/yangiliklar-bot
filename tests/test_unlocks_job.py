@@ -7,13 +7,18 @@ from tests.test_calendar_job import FakePublisher
 
 
 class GoodUnlocksService:
-    async def build_weekly_message(self) -> list[str]:
-        return ["🔓 top unlocks"]
+    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], bytes | None]:
+        return ["🔓 top unlocks"], None
+
+
+class ChartUnlocksService:
+    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], bytes | None]:
+        return ["🔓 top unlocks", "detail"], b"PNG-DATA"
 
 
 class EmptyUnlocksService:
-    async def build_weekly_message(self) -> list[str]:
-        return []
+    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], bytes | None]:
+        return [], None
 
 
 @pytest.fixture(autouse=True)
@@ -28,6 +33,17 @@ async def test_publishes_unlocks(monkeypatch):
     pub = FakePublisher()
     await jobs.send_token_unlocks(pub)
     assert pub.published == ["🔓 top unlocks"]
+    assert "yuborildi" in pub.notifications[0]
+
+
+async def test_publishes_photo_with_caption_then_remaining_text(monkeypatch):
+    monkeypatch.setattr(
+        "src.unlocks_service.service.TokenUnlocksService", ChartUnlocksService
+    )
+    pub = FakePublisher()
+    await jobs.send_token_unlocks(pub)
+    assert pub.photos == [(b"PNG-DATA", "🔓 top unlocks")]
+    assert pub.published == ["detail"]
     assert "yuborildi" in pub.notifications[0]
 
 
