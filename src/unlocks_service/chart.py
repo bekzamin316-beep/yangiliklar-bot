@@ -8,14 +8,17 @@ market cap, and a bottom "total supply unlocked" progress bar.
 Pure matplotlib (Agg backend) — no display needed. No emoji in glyphs.
 """
 
+import asyncio
 import io
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import httpx
 import matplotlib
 
 matplotlib.use("Agg")
+import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle, FancyBboxPatch, Rectangle
 
@@ -140,7 +143,55 @@ def _card(ax, x0: float, y0: float, x1: float, y1: float) -> None:
     ))
 
 
-def _render(events: list[dict], *, now: datetime | None = None) -> bytes:
+_LOGO_BASE = "https://s2.coinmarketcap.com/static/img/coins/128x128/{crypto_id}.png"
+_LOGO_UA = "Mozilla/5.0 (X11; Linux x86_64)"
+
+
+async def fetch_token_logos(events: list[dict], top_n: int | None = None) -> dict:
+    """Download real token logos (CoinMarketCap) for the top events.
+
+    Returns ``{symbol: logo_bytes}``; missing/failed downloads are skipped so
+    the renderer falls back to the coloured initial circle.
+    """
+    top_n = top_n or getattr(settings, "unlocks_top_n", 10)
+    symbols = {}
+    for ev in events[:top_n]:
+        sym = str(ev.get("symbol", "")).upper()
+        if sym:
+            symbols[sym] = ev
+
+    async with httpx.AsyncClient(timeout=8, headers={"User-Agent": _LOGO_UA},
+                                 follow_redirects=True) as client:
+        async def _one(sym: str, ev: dict) -> tuple[str | None, bytes | None]:
+            cid = ev.get("cryptoId")
+            if not cid:
+                return sym, None
+            try:
+                r = await client.get(_LOGO_BASE.format(crypto_id=cid))
+                if r.status_code == 200 and r.content:
+                    return sym, r.content
+            except Exception as e:
+                logger.debug("Logo fetch failed for %s: %s", sym, e)
+            return sym, None
+
+        results = await asyncio.gather(
+            *(_one(sym, ev) for sym, ev in symbols.items()),
+            return_exceptions=True,
+        )
+
+    logos = {}
+    for res in results:
+        if isinstance(res, Exception):
+            continue
+        sym, data = res
+        if sym and data:
+            logos[sym] = data
+    logger.info("Fetched %d/%d token logos", len(logos), len(symbols))
+    return logos
+
+
+def _render(events: list[dict], *, now: datetime | None = None,
+            logos: dict | None = None) -> bytes:
     """Render the top-N unlocks as a light infographic card chart."""
     ref = now or datetime.now(LOCAL_TZ)
     days_ahead = (7 - ref.weekday()) % 7 or 7
@@ -190,12 +241,29 @@ def _render(events: list[dict], *, now: datetime | None = None) -> bytes:
         quotes = ev.get("quotes") or []
         market_cap = quotes[0].get("marketCap") if quotes else None
 
-        # Logo circle with symbol initial
+        # Logo circle with real token logo (fallback to initial)
         radius = 3.1
-        ax.add_patch(Circle((cx, 82.6), radius, facecolor=color,
-                            edgecolor="white", linewidth=1.6, zorder=5))
-        ax.text(cx, 82.6, symbol[0], ha="center", va="center",
-                fontsize=11, fontweight="bold", color="white", zorder=6)
+        logo = (logos or {}).get(symbol)
+        if logo:
+            try:
+                arr = mpimg.imread(io.BytesIO(logo), format="png")
+                im = ax.imshow(arr, extent=[cx - radius, cx + radius,
+                                           82.6 - radius, 82.6 + radius],
+                               zorder=6, aspect="auto")
+                circle = Circle((cx, 82.6), radius, transform=ax.transData,
+                                zorder=7)
+                im.set_clip_path(circle)
+            except Exception as e:
+                logger.debug("Logo render failed for %s: %s", symbol, e)
+                ax.add_patch(Circle((cx, 82.6), radius, facecolor=color,
+                                    edgecolor="white", linewidth=1.6, zorder=5))
+                ax.text(cx, 82.6, symbol[0], ha="center", va="center",
+                        fontsize=11, fontweight="bold", color="white", zorder=6)
+        else:
+            ax.add_patch(Circle((cx, 82.6), radius, facecolor=color,
+                                edgecolor="white", linewidth=1.6, zorder=5))
+            ax.text(cx, 82.6, symbol[0], ha="center", va="center",
+                    fontsize=11, fontweight="bold", color="white", zorder=6)
 
         # Symbol + name
         ax.text(cx, 76.9, symbol, ha="center", va="center", fontsize=13,
@@ -280,12 +348,13 @@ def _value(ax, cx: float, y: float, text: str, size: float, color: str) -> None:
             fontweight="bold", color=color, zorder=4)
 
 
-def render_unlocks_chart(events: list[dict], *, now: datetime | None = None) -> bytes | None:
+def render_unlocks_chart(events: list[dict], *, now: datetime | None = None,
+                         logos: dict | None = None) -> bytes | None:
     """Public wrapper — returns PNG bytes or None if there is nothing to draw."""
     try:
         if not events:
             return None
-        return _render(events, now=now)
+        return _render(events, now=now, logos=logos)
     except Exception as e:
         logger.error("Failed to render unlocks chart: %s", e)
         return None

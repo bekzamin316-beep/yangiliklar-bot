@@ -22,7 +22,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import settings
-from src.unlocks_service.chart import render_unlocks_chart, _fmt_tokens
+from src.unlocks_service.chart import render_unlocks_chart, _fmt_tokens, fetch_token_logos
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +243,7 @@ class TokenUnlocksService:
 
     def build_weekly_message_with_chart(
         self, items: list[dict], *, now: datetime | None = None,
+        logos: dict | None = None,
     ) -> tuple[list[str], bytes | None]:
         """Build message parts plus a PNG chart of the top unlocks.
 
@@ -274,7 +275,7 @@ class TokenUnlocksService:
         blocks.append(f"💰 <b>Jami haftalik unlock:</b> ≈{_fmt_usd(total_usd)}")
         blocks.append("🔗 Manba: CoinMarketCap")
 
-        chart = render_unlocks_chart(events, now=now)
+        chart = render_unlocks_chart(events, now=now, logos=logos)
         return self._split_message(blocks), chart
 
     async def build_weekly_message(self) -> list[str]:
@@ -285,4 +286,8 @@ class TokenUnlocksService:
     async def build_weekly_message_with_chart_async(self) -> tuple[list[str], bytes | None]:
         """Fetch events and build message parts plus a PNG chart."""
         items = await self.fetch_events()
-        return self.build_weekly_message_with_chart(items)
+        events = self._filter_upcoming_week(items)
+        if not events:
+            return [], None
+        logos = await fetch_token_logos(events)
+        return self.build_weekly_message_with_chart(items, logos=logos)
