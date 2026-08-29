@@ -22,7 +22,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import settings
-from src.unlocks_service.chart import render_unlocks_chart
+from src.unlocks_service.chart import render_unlocks_chart, _fmt_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,7 @@ class TokenUnlocksService:
     def _event_line(self, rank: int, ev: dict) -> str:
         nu = ev.get("nextUnlocked") or {}
         usd = _fmt_usd(nu.get("tokenAmountUsd"))
+        pct = nu.get("tokenAmountPercentage")
         when = ev["_when"]
         weekday = _UZ_WEEKDAYS[when.weekday()]
         date_str = f"{weekday}, {when.day} {_UZ_MONTHS[when.month - 1]}"
@@ -171,6 +172,14 @@ class TokenUnlocksService:
             f"{self._rank_label(rank)}<b>{ev.get('symbol', '?')}</b>"
             f" ({ev.get('name', '')}) — <b>{usd}</b> — {date_str}, {when.strftime('%H:%M')}"
         )
+        extra: list[str] = []
+        if pct is not None:
+            extra.append(f"taqsimotning {str(pct).replace('.', ',')}% i ochiladi")
+        locked = ev.get("tokenLockedAmount")
+        if locked:
+            extra.append(f"qulfdan qoldi: {_fmt_tokens(locked)} token")
+        if extra:
+            line += "\n     " + " · ".join(extra)
         details = ev.get("nextUnlockedDetail") or []
         names = [
             (d.get("allocationName") or "").strip() for d in details
