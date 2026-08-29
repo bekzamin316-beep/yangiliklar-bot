@@ -26,6 +26,33 @@ _scheduler: AsyncIOScheduler | None = None
 DIGEST_JOB_ID = "telegraph_digest"
 _DEFAULT_TIMES = ["08:00", "12:00", "18:00", "22:00"]
 
+# Full/short weekday names → APScheduler day_of_week index (sun=0 ... sat=6)
+_WEEKDAY_MAP = {
+    "sunday": "sun", "monday": "mon", "tuesday": "tue", "wednesday": "wed",
+    "thursday": "thu", "friday": "fri", "saturday": "sat",
+    "yakshanba": "sun", "dushanba": "mon", "seshanba": "tue",
+    "chorshanba": "wed", "payshanba": "thu", "juma": "fri", "shanba": "sat",
+}
+
+
+def _normalize_weekday(name: str) -> str:
+    """Normalize a weekday name to a 3-letter APScheduler abbreviation or 0-6 index."""
+    key = (name or "").strip().lower()
+    if not key:
+        return "sun"
+    if key in _WEEKDAY_MAP:
+        return _WEEKDAY_MAP[key]
+    if key.isdigit():
+        idx = int(key)
+        if 0 <= idx <= 6:
+            return key
+    elif len(key) >= 3:
+        short = key[:3]
+        if short in ("sun", "mon", "tue", "wed", "thu", "fri", "sat"):
+            return short
+    logger.warning("Unknown weekday name %r — falling back to 'sun'", name)
+    return "sun"
+
 
 def _parse_times(schedule_times: list[str]) -> set[tuple[int, int]]:
     """Parse schedule times into a set of (hour, minute) pairs."""
@@ -145,7 +172,7 @@ def create_scheduler(publisher: Publisher) -> AsyncIOScheduler:
     # Job 4: Weekly economic calendar post
     if settings.economic_calendar_enabled:
         try:
-            day = (settings.calendar_post_day or "sunday").strip().lower()
+            day = _normalize_weekday(settings.calendar_post_day or "sunday")
             time_parts = (settings.calendar_post_time or "20:00").split(":")
             cal_hour, cal_minute = int(time_parts[0]), int(time_parts[1])
             scheduler.add_job(
@@ -165,7 +192,7 @@ def create_scheduler(publisher: Publisher) -> AsyncIOScheduler:
     # Job 5: Weekly top token unlocks post
     if getattr(settings, "token_unlocks_enabled", True):
         try:
-            u_day = (settings.unlocks_post_day or "sunday").strip().lower()
+            u_day = _normalize_weekday(settings.unlocks_post_day or "sunday")
             u_parts = (settings.unlocks_post_time or "20:15").split(":")
             scheduler.add_job(
                 send_token_unlocks,
