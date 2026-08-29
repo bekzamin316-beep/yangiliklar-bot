@@ -7,18 +7,23 @@ from tests.test_calendar_job import FakePublisher
 
 
 class GoodUnlocksService:
-    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], bytes | None]:
-        return ["🔓 top unlocks"], None
+    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], list[bytes]]:
+        return ["🔓 top unlocks"], []
 
 
 class ChartUnlocksService:
-    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], bytes | None]:
-        return ["🔓 top unlocks", "detail"], b"PNG-DATA"
+    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], list[bytes]]:
+        return ["🔓 top unlocks", "detail"], [b"PNG-DATA"]
+
+
+class MultiChartUnlocksService:
+    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], list[bytes]]:
+        return ["🔓 top unlocks", "detail"], [b"PNG-1", b"PNG-2"]
 
 
 class EmptyUnlocksService:
-    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], bytes | None]:
-        return [], None
+    async def build_weekly_message_with_chart_async(self) -> tuple[list[str], list[bytes]]:
+        return [], []
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +48,20 @@ async def test_publishes_photo_with_caption_then_remaining_text(monkeypatch):
     pub = FakePublisher()
     await jobs.send_token_unlocks(pub)
     assert pub.photos == [(b"PNG-DATA", "🔓 top unlocks")]
+    assert pub.published == ["detail"]
+    assert "yuborildi" in pub.notifications[0]
+
+
+async def test_publishes_multiple_photos_first_gets_caption(monkeypatch):
+    monkeypatch.setattr(
+        "src.unlocks_service.service.TokenUnlocksService", MultiChartUnlocksService
+    )
+    pub = FakePublisher()
+    await jobs.send_token_unlocks(pub)
+    assert pub.photos == [
+        (b"PNG-1", "🔓 top unlocks"),
+        (b"PNG-2", ""),
+    ]
     assert pub.published == ["detail"]
     assert "yuborildi" in pub.notifications[0]
 

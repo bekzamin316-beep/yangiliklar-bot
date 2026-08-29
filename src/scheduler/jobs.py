@@ -344,27 +344,28 @@ async def _send_parts_with_retry(
     """Build channel post parts with hourly retries, then publish them.
 
     ``build`` is a zero-arg callable returning either a list of HTML strings
-    (text-only) or a ``(parts, photo_bytes)`` tuple. An empty result or a
-    raised exception both trigger the next retry attempt. When photo bytes are
-    returned the photo is sent first with the first text part as its caption,
+    (text-only) or a ``(parts, chart_images)`` tuple where ``chart_images`` is
+    a list of PNG byte strings. An empty result or a raised exception both
+    trigger the next retry attempt. When chart images are returned they are
+    sent first (the first one carries the first text part as its caption),
     followed by the remaining parts.
     """
     parts: list[str] = []
-    photo: bytes | None = None
+    chart_images: list[bytes] = []
     for attempt in range(_CALENDAR_MAX_RETRIES + 1):
         try:
             built = await build()
             if isinstance(built, tuple):
-                parts, photo = built
+                parts, chart_images = built
             else:
-                parts, photo = built, None
+                parts, chart_images = built, []
         except Exception as e:
             # Transient failures (rate limits, network) are retried too
             logger.warning(
                 "%s attempt %d/%d failed: %s",
                 label, attempt + 1, _CALENDAR_MAX_RETRIES + 1, e,
             )
-            parts, photo = [], None
+            parts, chart_images = [], []
         if parts:
             break
         if attempt < _CALENDAR_MAX_RETRIES:
@@ -382,13 +383,16 @@ async def _send_parts_with_retry(
         return
 
     sent = 0
-    if photo:
-        caption = parts[0][:1000]
-        if await publisher.publish_photo(photo, caption):
+    caption = parts[0][:1000]
+    for idx, photo in enumerate(chart_images):
+        if idx > 0 or sent > 0:
+            await asyncio.sleep(1.5)
+        if await publisher.publish_photo(photo, caption if idx == 0 else ""):
             sent += 1
-            parts = parts[1:]
         else:
-            logger.warning("%s: photo send failed — falling back to text", label)
+            logger.warning("%s: photo %d send failed — falling back to text", label, idx + 1)
+            break
+    parts = parts[1:] if chart_images else parts
     for i, part in enumerate(parts):
         if i > 0 or sent > 0:
             await asyncio.sleep(1.5)
@@ -397,7 +401,7 @@ async def _send_parts_with_retry(
         else:
             break
     await publisher.send_admin_notification(
-        f"{label}: ✅ <b>yuborildi</b> ({sent}/{len(parts) + (1 if photo else 0)} xabar)"
+        f"{label}: ✅ <b>yuborildi</b> ({sent}/{len(parts) + len(chart_images)} xabar)"
     )
     logger.info("%s published: %d/%d messages", label, sent, len(parts))
 

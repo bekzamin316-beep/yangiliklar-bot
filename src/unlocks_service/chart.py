@@ -348,13 +348,34 @@ def _value(ax, cx: float, y: float, text: str, size: float, color: str) -> None:
             fontweight="bold", color=color, zorder=4)
 
 
+def render_unlocks_charts(
+    events: list[dict], *, now: datetime | None = None,
+    logos: dict | None = None, per_image: int = 5,
+) -> list[bytes]:
+    """Render the top-N unlocks as several PNG infographic cards.
+
+    Tokens are split into chunks of ``per_image`` (default 5) so each image
+    stays reasonably wide instead of one very elongated 10-column chart.
+    Returns an empty list when there is nothing to draw.
+    """
+    top_n = getattr(settings, "unlocks_top_n", 10)
+    top = list(events[:top_n])
+    if not top:
+        return []
+    images = []
+    for i in range(0, len(top), per_image):
+        chunk = top[i:i + per_image]
+        try:
+            img = _render(chunk, now=now, logos=logos)
+            if img:
+                images.append(img)
+        except Exception as e:
+            logger.error("Failed to render unlocks chart chunk %d: %s", i, e)
+    return images
+
+
 def render_unlocks_chart(events: list[dict], *, now: datetime | None = None,
                          logos: dict | None = None) -> bytes | None:
-    """Public wrapper — returns PNG bytes or None if there is nothing to draw."""
-    try:
-        if not events:
-            return None
-        return _render(events, now=now, logos=logos)
-    except Exception as e:
-        logger.error("Failed to render unlocks chart: %s", e)
-        return None
+    """Public wrapper — returns the first PNG chunk or None if nothing to draw."""
+    images = render_unlocks_charts(events, now=now, logos=logos)
+    return images[0] if images else None
