@@ -97,6 +97,26 @@ async def on_startup(bot, publisher: Publisher) -> None:
             logger.error("One-off digest failed: %s", e, exc_info=True)
             await publisher.send_admin_notification(f"❌ <b>Digest xato:</b> {e}")
 
+    # One-off: trigger the weekly token unlocks post immediately (for on-demand testing)
+    if _os.environ.get("RUN_UNLOCKS_NOW") == "1":
+        logger.info("RUN_UNLOCKS_NOW=1 detected — triggering one-off unlocks post...")
+        try:
+            from src.scheduler.jobs import send_token_unlocks
+            await send_token_unlocks(publisher)
+        except Exception as e:
+            logger.error("One-off unlocks post failed: %s", e, exc_info=True)
+            await publisher.send_admin_notification(f"❌ <b>Unlock posti xato:</b> {e}")
+
+    # One-off: trigger the weekly economic calendar post immediately (for on-demand testing)
+    if _os.environ.get("RUN_CALENDAR_NOW") == "1":
+        logger.info("RUN_CALENDAR_NOW=1 detected — triggering one-off calendar post...")
+        try:
+            from src.scheduler.jobs import send_economic_calendar
+            await send_economic_calendar(publisher)
+        except Exception as e:
+            logger.error("One-off calendar post failed: %s", e, exc_info=True)
+            await publisher.send_admin_notification(f"❌ <b>Kalendar posti xato:</b> {e}")
+
 
 async def on_shutdown(bot, scheduler) -> None:
     """Actions to run on bot shutdown."""
