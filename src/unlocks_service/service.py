@@ -22,7 +22,12 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.core.config import settings
-from src.unlocks_service.chart import render_unlocks_charts, _fmt_tokens, fetch_token_logos
+from src.unlocks_service.chart import (
+    CHART_PER_IMAGE,
+    render_unlocks_charts,
+    _fmt_tokens,
+    fetch_token_logos,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +166,7 @@ class TokenUnlocksService:
         prefix = _RANK_EMOJI.get(rank, f"{rank}.")
         return f"{prefix} "
 
-    def _event_line(self, rank: int, ev: dict) -> str:
+    def _event_line(self, rank: int, ev: dict, *, compact: bool = False) -> str:
         nu = ev.get("nextUnlocked") or {}
         usd = _fmt_usd(nu.get("tokenAmountUsd"))
         pct = nu.get("tokenAmountPercentage")
@@ -180,6 +185,9 @@ class TokenUnlocksService:
             extra.append(f"qulfdan qoldi: {_fmt_tokens(locked)} token")
         if extra:
             line += "\n     " + " · ".join(extra)
+        if compact:
+            # Telegram photo captions cap at 1024 chars — skip cluster details
+            return line
         details = ev.get("nextUnlockedDetail") or []
         names = [
             (d.get("allocationName") or "").strip() for d in details
@@ -245,38 +253,59 @@ class TokenUnlocksService:
         self, items: list[dict], *, now: datetime | None = None,
         logos: dict | None = None,
     ) -> tuple[list[str], list[bytes]]:
-        """Build message parts plus PNG chart images of the top unlocks.
+        """Build per-image captions plus PNG chart images of the top unlocks.
 
-        Returns ``(parts, chart_images)``; ``chart_images`` is an empty list
-        when there are no events or rendering fails, in which case the
-        text-only fallback is used by the caller.
+        The event list is split into chunks of ``CHART_PER_IMAGE`` tokens; each
+        chart image gets its own caption listing exactly the tokens shown in
+        that image. Returns ``(captions, chart_images)``; ``chart_images`` is
+        an empty list when there are no events or rendering fails, in which
+        case the caller falls back to the plain text message.
         """
         events = self._filter_upcoming_week(items, now=now)
         if not events:
             logger.warning("Unlocks: no events in the upcoming week — nothing to send")
-            return [], None
+            return [], []
 
         top_n = getattr(settings, "unlocks_top_n", 10)
+        top = list(events[:top_n])
         ref = now or datetime.now(LOCAL_TZ)
         days_ahead = (7 - ref.weekday()) % 7 or 7
-        week_start = (ref + timedelta(days=days_ahead)).replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = (ref + timedelta(days=days_ahead)).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
         week_end = week_start + timedelta(days=7)
-
-        blocks = [
-            f"🔓 <b>TOP-{min(top_n, len(events))} QULFDAN OCHILADIGAN TOKENLAR — "
-            f"{_week_range_str(week_start, week_end - timedelta(days=1))}</b>",
-        ]
-        for rank, ev in enumerate(events[:top_n], 1):
-            blocks.append(self._event_line(rank, ev))
+        header = (
+            f"🔓 <b>TOP-{len(top)} QULFDAN OCHILADIGAN TOKENLAR — "
+            f"{_week_range_str(week_start, week_end - timedelta(days=1))}</b>"
+        )
 
         total_usd = sum(
-            (e.get("nextUnlocked") or {}).get("tokenAmountUsd") or 0 for e in events
+            (e.get("nextUnlocked") or {}).get("tokenAmountUsd") or 0 for e in top
         )
-        blocks.append(f"💰 <b>Jami haftalik unlock:</b> ≈{_fmt_usd(total_usd)}")
-        blocks.append("🔗 Manba: CoinMarketCap")
+        footer = f"💰 <b>Jami haftalik unlock:</b> ≈{_fmt_usd(total_usd)}"
 
-        chart = render_unlocks_charts(events, now=now, logos=logos)
-        return self._split_message(blocks), chart
+        per = CHART_PER_IMAGE
+        captions: list[str] = []
+        for start in range(0, len(top), per):
+            chunk = top[start:start + per]
+            ranks = range(start + 1, start + 1 + len(chunk))
+            blocks = [header]
+            blocks.extend(
+                self._event_line(rank, ev, compact=True)
+                for rank, ev in zip(ranks, chunk)
+            )
+            if start + per >= len(top):
+                blocks.append(footer)
+            captions.append("\n\n".join(blocks))
+
+        charts = render_unlocks_charts(top, now=now, logos=logos)
+        if len(charts) != len(captions):
+            logger.warning(
+                "Unlocks: %d charts vs %d captions — falling back to text",
+                len(charts), len(captions),
+            )
+            return [self.build_weekly_message_sync_items(items, now=now) or ""], []
+        return captions, charts
 
     async def build_weekly_message(self) -> list[str]:
         """Build one or more HTML posts for the upcoming week's biggest unlocks."""

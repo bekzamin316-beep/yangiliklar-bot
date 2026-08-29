@@ -18,7 +18,7 @@ class ChartUnlocksService:
 
 class MultiChartUnlocksService:
     async def build_weekly_message_with_chart_async(self) -> tuple[list[str], list[bytes]]:
-        return ["🔓 top unlocks", "detail"], [b"PNG-1", b"PNG-2"]
+        return ["🔓 top unlocks 1-5", "🔓 top unlocks 6-10"], [b"PNG-1", b"PNG-2"]
 
 
 class EmptyUnlocksService:
@@ -48,21 +48,21 @@ async def test_publishes_photo_with_caption_then_remaining_text(monkeypatch):
     pub = FakePublisher()
     await jobs.send_token_unlocks(pub)
     assert pub.photos == [(b"PNG-DATA", "🔓 top unlocks")]
-    assert pub.published == ["detail"]
+    assert pub.published == []
     assert "yuborildi" in pub.notifications[0]
 
 
-async def test_publishes_multiple_photos_first_gets_caption(monkeypatch):
+async def test_publishes_multiple_photos_each_with_own_caption(monkeypatch):
     monkeypatch.setattr(
         "src.unlocks_service.service.TokenUnlocksService", MultiChartUnlocksService
     )
     pub = FakePublisher()
     await jobs.send_token_unlocks(pub)
     assert pub.photos == [
-        (b"PNG-1", "🔓 top unlocks"),
-        (b"PNG-2", ""),
+        (b"PNG-1", "🔓 top unlocks 1-5"),
+        (b"PNG-2", "🔓 top unlocks 6-10"),
     ]
-    assert pub.published == ["detail"]
+    assert pub.published == []
     assert "yuborildi" in pub.notifications[0]
 
 

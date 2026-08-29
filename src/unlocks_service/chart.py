@@ -348,9 +348,12 @@ def _value(ax, cx: float, y: float, text: str, size: float, color: str) -> None:
             fontweight="bold", color=color, zorder=4)
 
 
+CHART_PER_IMAGE = 5
+
+
 def render_unlocks_charts(
     events: list[dict], *, now: datetime | None = None,
-    logos: dict | None = None, per_image: int = 5,
+    logos: dict | None = None, per_image: int = CHART_PER_IMAGE,
 ) -> list[bytes]:
     """Render the top-N unlocks as several PNG infographic cards.
 

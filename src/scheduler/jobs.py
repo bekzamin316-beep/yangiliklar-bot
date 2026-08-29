@@ -344,11 +344,10 @@ async def _send_parts_with_retry(
     """Build channel post parts with hourly retries, then publish them.
 
     ``build`` is a zero-arg callable returning either a list of HTML strings
-    (text-only) or a ``(parts, chart_images)`` tuple where ``chart_images`` is
-    a list of PNG byte strings. An empty result or a raised exception both
-    trigger the next retry attempt. When chart images are returned they are
-    sent first (the first one carries the first text part as its caption),
-    followed by the remaining parts.
+    (text-only) or a ``(captions, chart_images)`` tuple. When chart images are
+    present each image is sent with its matching caption (text-only parts are
+    skipped — the captions already carry the full listing). An empty result
+    or a raised exception both trigger the next retry attempt.
     """
     parts: list[str] = []
     chart_images: list[bytes] = []
@@ -383,27 +382,32 @@ async def _send_parts_with_retry(
         return
 
     sent = 0
-    caption = parts[0][:1000]
-    for idx, photo in enumerate(chart_images):
-        if idx > 0 or sent > 0:
-            await asyncio.sleep(1.5)
-        if await publisher.publish_photo(photo, caption if idx == 0 else ""):
-            sent += 1
-        else:
-            logger.warning("%s: photo %d send failed — falling back to text", label, idx + 1)
-            break
-    parts = parts[1:] if chart_images else parts
-    for i, part in enumerate(parts):
-        if i > 0 or sent > 0:
-            await asyncio.sleep(1.5)
-        if await publisher.publish_digest(part):
-            sent += 1
-        else:
-            break
+    total = len(chart_images) if chart_images else len(parts)
+    if chart_images:
+        # Each chart image carries the caption of the tokens it shows
+        for idx, photo in enumerate(chart_images):
+            caption = parts[idx][:1000] if idx < len(parts) else ""
+            if idx > 0:
+                await asyncio.sleep(1.5)
+            if await publisher.publish_photo(photo, caption):
+                sent += 1
+            else:
+                logger.warning(
+                    "%s: photo %d send failed — falling back to text", label, idx + 1,
+                )
+                break
+    else:
+        for i, part in enumerate(parts):
+            if i > 0:
+                await asyncio.sleep(1.5)
+            if await publisher.publish_digest(part):
+                sent += 1
+            else:
+                break
     await publisher.send_admin_notification(
-        f"{label}: ✅ <b>yuborildi</b> ({sent}/{len(parts) + len(chart_images)} xabar)"
+        f"{label}: ✅ <b>yuborildi</b> ({sent}/{total} xabar)"
     )
-    logger.info("%s published: %d/%d messages", label, sent, len(parts))
+    logger.info("%s published: %d/%d messages", label, sent, total)
 
 
 async def send_economic_calendar(publisher: Publisher) -> None:
