@@ -3,7 +3,7 @@
 from functools import cached_property
 from typing import List
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 # Built-in DashScope model rotation. Used as the effective rotation when the
@@ -56,6 +56,22 @@ class Settings(BaseSettings):
         "sqlite+aiosqlite:///./cnbot.db",
         description="Async SQLAlchemy URL",
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalize_database_url(cls, v):
+        """Accept plain postgres:// URLs from Neon, Render, Railway, Heroku.
+
+        The async engine needs the explicit ``postgresql+asyncpg://`` scheme;
+        pasting a raw provider connection string must not require editing.
+        """
+        if isinstance(v, str):
+            v = v.strip().strip('"').strip("'")
+            if v.startswith("postgres://"):
+                v = "postgresql+asyncpg://" + v[len("postgres://"):]
+            elif v.startswith("postgresql://"):
+                v = "postgresql+asyncpg://" + v[len("postgresql://"):]
+        return v
 
     # Redis
     redis_url: str = Field("redis://localhost:6379/0", description="Redis URL")

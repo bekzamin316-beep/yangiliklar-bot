@@ -22,7 +22,10 @@ Uxlamaslik tizimi: bot har 10 daqiqada o'zining `/health` sahifasiga so'rov yubo
 2. Project yaratish (nomi: `crypto-news`)
 3. Dashboard'da **Connection string** ni nusxalang:
    `postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require`
-4. Eski ma'lumotlarni saqlash kerak bo'lsa — ayting, Railway Postgres'dan dump olaman
+4. **Eski ma'lumotlarni saqlash kerak bo'lsa** — tayyor zaxira fayllar lokalda turadi:
+   - `~/yangiliklar-bot-backup/db/railway-<sana>.dump` — barcha data (10 jadval)
+   - Neon'ga ko'chirish: `NEON_URL='<neon string>' ./scripts/neon-restore.sh`
+   - (Config `postgres://` ni avtomatik `postgresql+asyncpg://` ga o'zgartiradi — stringni tahrirlash shart emas.)
 
 ## 2-qadam: Render Web Service (~4 daqiqa)
 
@@ -79,3 +82,41 @@ Xuddi shu repodan yana bir **Web Service** yarating, faqat boshqa qiymatlar:
 - Free instans RAM 512MB — bu bot uchun yetarli (hozirgi sarfi ~150-250MB)
 - Render ba'zan free konteynerlarni restart qiladi — bot avtomatik tiklanadi
 - Railway'dan ma'lumot ko'chirish: xohlasangiz oldin dump olib Neon'ga yuklayman
+
+---
+
+## Zaxira va "muddat tugadi" rejasi (avtomatlashtirilgan)
+
+Hammasi lokal saqlanadi — Railway to'xtasa, 10 daqiqada boshqa provayderga o'tasiz.
+
+### Avtomatik zaxira scriptlari (`scripts/`)
+
+| Script | Nima qiladi |
+|---|---|
+| `./scripts/backup-env.sh` | Railway'ning 37 ta env o'zgaruvchisini → `~/yangiliklar-bot-backup/env-*.env` + Render uchun tayyor `render.env` |
+| `./scripts/db-dump.sh` | Postgres dump (SSH tunnel, public kerak emas) → `~/yangiliklar-bot-backup/db/railway-<sana>.dump` |
+| `NEON_URL='...' ./scripts/neon-restore.sh` | Dump faylini Neon'ga ko'chiradi |
+
+Zaxira joylari (repo'dan TASHQARIDA, git'ga tushmaydi):
+```
+~/yangiliklar-bot-backup/
+├── db/railway-2026-10-07.dump    # data (10 jadval)
+├── env-bot-2026-10-07.env        # bot o'zgaruvchilari (37 ta)
+├── env-postgres-2026-10-07.env
+├── env-redis-2026-10-07.env
+└── render.env                    # Render'ga paste qilishga tayyor
+```
+
+### Muddat tugaganda qilinadigan ishlar (qo'llanma)
+
+1. **Neon** (bepul, karta kerak emas): dump'ni ko'chirish
+   ```bash
+   NEON_URL='postgresql://...' ./scripts/neon-restore.sh
+   ```
+2. **Render**: `render.yaml` bilan Web Service yuqoridagi 2-qadam bo'yicha,
+   env'larni `~/yangiliklar-bot-backup/render.env` dan joylashtirish,
+   `DATABASE_URL` = Neon stringi (qayta tahrirlash shart emas — config avtomatik o'zgartiradi)
+3. **Tekshirish**: Logs'da `Database initialized` + `Digest complete` ko'rinishi kerak
+4. **Telegram'da uzilish bo'lmaydi** — faqat 10-15 daqiqa o'chiq bo'ladi (bot joyida qayta ishga tushadi)
+
+> Redis'siz ham ishlaydi (AI limitlar cheatlashtiriladi) — xohlasangiz Upstash bepul qo'shing.
