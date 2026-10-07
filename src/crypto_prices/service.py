@@ -61,6 +61,8 @@ class CryptoPriceService:
 
     COINGECKO_URL = "https://api.coingecko.com/api/v3"
     BINANCE_URL = "https://api.binance.com/api/v3"
+    BINANCE_VISION_URL = "https://data-api.binance.vision/api/v3"
+    BYBIT_URL = "https://api.bybit.com/v5"
 
     # In-memory cache
     _cache: dict = {}
@@ -102,8 +104,16 @@ class CryptoPriceService:
             self._cache_ts = now
             return result
 
-        # Both failed → CoinCap fallback
-        logger.info("Binance failed, falling back to CoinCap API")
+        # Both failed → Bybit fallback (public, no key, one request for all)
+        logger.info("Binance failed, falling back to Bybit API")
+        result = await self._fetch_bybit(coin_ids)
+        if result:
+            self._cache = result
+            self._cache_ts = now
+            return result
+
+        # All failed → CoinCap fallback
+        logger.info("Bybit failed, falling back to CoinCap API")
         result = await self._fetch_coincap(coin_ids)
         if result:
             self._cache = result
@@ -190,7 +200,11 @@ class CryptoPriceService:
             return {}
 
     async def _fetch_binance(self, coin_ids: list[str]) -> dict:
-        """Fetch from Binance API as fallback. Returns empty dict on failure."""
+        """Fetch from Binance API as fallback. Returns empty dict on failure.
+
+        Tries api.binance.com first; on 418/403 (datacenter IPs are often
+        rate-limited) falls back to the public data mirror data-api.binance.vision.
+        """
         symbols = []
         for coin_id in coin_ids:
             sym = _BINANCE_SYMBOL_MAP.get(coin_id)
@@ -201,18 +215,27 @@ class CryptoPriceService:
             logger.warning("No Binance symbols found for coin_ids: %s", coin_ids)
             return {}
 
+        bases = [self.BINANCE_URL, self.BINANCE_VISION_URL]
+        active_base = None  # host that worked for the first symbol
         result = {}
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
                 for symbol in symbols:
-                    resp = await client.get(
-                        f"{self.BINANCE_URL}/ticker/24hr",
-                        params={"symbol": symbol},
-                    )
-                    if resp.status_code != 200:
-                        logger.warning("Binance %s returned %d", symbol, resp.status_code)
+                    data = None
+                    for base in ([active_base] if active_base else bases):
+                        resp = await client.get(
+                            f"{base}/ticker/24hr",
+                            params={"symbol": symbol},
+                        )
+                        if resp.status_code == 200:
+                            active_base = base
+                            data = resp.json()
+                            break
+                        logger.warning(
+                            "Binance %s returned %d (%s)", symbol, resp.status_code, base
+                        )
+                    if not data:
                         continue
-                    data = resp.json()
 
                     coin_id = _BINANCE_REVERSE_MAP.get(symbol)
                     if coin_id:
@@ -227,6 +250,50 @@ class CryptoPriceService:
 
         except Exception as e:
             logger.error("Binance fetch failed: %s", e)
+            return {}
+
+    async def _fetch_bybit(self, coin_ids: list[str]) -> dict:
+        """Fetch from Bybit public API (free, no key, single request for all)."""
+        result = {}
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(self.timeout)) as client:
+                resp = await client.get(
+                    f"{self.BYBIT_URL}/market/tickers",
+                    params={"category": "spot"},
+                )
+                if resp.status_code != 200:
+                    logger.warning("Bybit returned %d", resp.status_code)
+                    return {}
+                data = resp.json()
+                if data.get("retCode") != 0:
+                    logger.warning("Bybit error: %s", data.get("retMsg"))
+                    return {}
+                tickers = {
+                    t.get("symbol"): t
+                    for t in data.get("result", {}).get("list", [])
+                }
+                for coin_id in coin_ids:
+                    sym = _BINANCE_SYMBOL_MAP.get(coin_id)
+                    candidates = [sym] if sym else []
+                    if sym and sym.startswith("1000"):
+                        # Bybit spot quotes PEPEUSDT, Binance uses 1000PEPEUSDT
+                        candidates.append(sym[4:])
+                    ticker = None
+                    for cand in candidates:
+                        ticker = tickers.get(cand)
+                        if ticker:
+                            break
+                    if not ticker:
+                        continue
+                    result[coin_id] = {
+                        "price": float(ticker.get("lastPrice", 0)),
+                        # price24hPcnt is a fraction (0.01 = 1%)
+                        "change_24h": float(ticker.get("price24hPcnt", 0)) * 100.0,
+                    }
+                return result
+
+        except Exception as e:
+            logger.error("Bybit fetch failed: %s", e)
             return {}
 
     async def get_coin_ids(self) -> list[str]:
