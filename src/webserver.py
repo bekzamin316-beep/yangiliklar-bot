@@ -50,9 +50,14 @@ async def start_health_server() -> web.AppRunner:
 
 async def self_ping_loop() -> None:
     """Request our own public URL periodically so the host never idles out."""
-    host = os.environ.get("SPACE_HOST", "").strip()
+    host = os.environ.get("SPACE_HOST", "").strip()  # HuggingFace Spaces
     if not host:
-        logger.info("SPACE_HOST not set — self-ping disabled")
+        # Render sets RENDER_EXTERNAL_URL (https://...onrender.com) for web services
+        render_url = os.environ.get("RENDER_EXTERNAL_URL", "").strip()
+        if render_url:
+            host = render_url.split("://", 1)[-1]
+    if not host:
+        logger.info("SPACE_HOST/RENDER_EXTERNAL_URL not set — self-ping disabled")
         return
     url = f"https://{host}/health"
     logger.info("Self-ping enabled: %s every %ds", url, PING_INTERVAL_SECONDS)
