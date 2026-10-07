@@ -62,15 +62,28 @@ class Settings(BaseSettings):
     def _normalize_database_url(cls, v):
         """Accept plain postgres:// URLs from Neon, Render, Railway, Heroku.
 
-        The async engine needs the explicit ``postgresql+asyncpg://`` scheme;
-        pasting a raw provider connection string must not require editing.
+        The async engine needs the explicit ``postgresql+asyncpg://`` scheme,
+        asyncpg speaks ``ssl=`` (not libpq's ``sslmode=``) and does not know
+        ``channel_binding`` — so any raw provider string must be adapted
+        instead of requiring hand-editing before paste.
         """
-        if isinstance(v, str):
-            v = v.strip().strip('"').strip("'")
-            if v.startswith("postgres://"):
-                v = "postgresql+asyncpg://" + v[len("postgres://"):]
-            elif v.startswith("postgresql://"):
-                v = "postgresql+asyncpg://" + v[len("postgresql://"):]
+        if not isinstance(v, str):
+            return v
+        v = v.strip().strip('"').strip("'")
+        if v.startswith("postgres://"):
+            v = "postgresql+asyncpg://" + v[len("postgres://"):]
+        elif v.startswith("postgresql://"):
+            v = "postgresql+asyncpg://" + v[len("postgresql://"):]
+        if v.startswith("postgresql+asyncpg://"):
+            from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+            parts = urlsplit(v)
+            query = [
+                ("ssl" if k == "sslmode" else k, val)
+                for k, val in parse_qsl(parts.query, keep_blank_values=True)
+                if k != "channel_binding"
+            ]
+            v = urlunsplit(parts._replace(query=urlencode(query)))
         return v
 
     # Redis
