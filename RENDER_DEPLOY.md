@@ -120,3 +120,25 @@ Zaxira joylari (repo'dan TASHQARIDA, git'ga tushmaydi):
 4. **Telegram'da uzilish bo'lmaydi** — faqat 10-15 daqiqa o'chiq bo'ladi (bot joyida qayta ishga tushadi)
 
 > Redis'siz ham ishlaydi (AI limitlar cheatlashtiriladi) — xohlasangiz Upstash bepul qo'shing.
+
+### Hozirgi holat (2026-10-07 dan beri)
+
+- **Asosiy server: Render** — https://crypto-news-bot-lf0w.onrender.com
+  (`srv-db366g942hec738n7810`, bepul plan, Singapore, self-ping 600s yoqilgan)
+- **Railway faol emas**: deployment o'chirilgan **va GitHub manzili uzilgan**
+  (`repo: null`) — push'lar Railway'ni avtomatik qayta ishga tushirmaydi,
+  ya'ni ikkita bot Telegram'da konflikt qilmaydi.
+- **Neon** — asosiy bazaga ulangan (Database URL to'g'ridan-to'g'gi, `sslmode` config tomonidan avtomatik moslashtiriladi).
+
+**Railway'ga qaytish kerak bo'lsa** (masalan Render'da muammo chiqsa):
+
+```bash
+cd ~/yangiliklar-bot && source "$HOME/.railway/env"
+# 1) GitHub manzilini qayta ulash
+railway service source connect --repo bekzamin316-beep/yangiliklar-bot --branch main --service yangiliklar-bot
+# 2) Render xizmatini to'xtatish (dashboard → Suspend) va Railway'ni ishga tushirish
+railway redeploy -s yangiliklar-bot
+```
+
+> Muhim: **bir vaqtda faqat bitta server polling qilsin** — ikkisi birdan
+> `TelegramConflictError` beradi. Bittasini o'chirib, keyin ikkinchisini yoqing.
