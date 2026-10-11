@@ -119,10 +119,12 @@ class BaseAIProvider:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "temperature": temperature,
             "max_tokens": max_tokens or 1024,
             **self._extra_payload(),
         }
+        # kimi-k3 (Moonshot) rejects the temperature parameter outright (HTTP 400)
+        if not self.model.startswith("kimi"):
+            payload["temperature"] = temperature
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
 
