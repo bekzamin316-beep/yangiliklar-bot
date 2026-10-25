@@ -18,6 +18,15 @@ logger = logging.getLogger(__name__)
 # Valid sentiment values
 _VALID_SENTIMENTS = {"bullish", "bearish", "neutral"}
 
+# Phrases that only occur in the JSON example inside prompts/analyze.txt. Weak
+# models sometimes echo the schema instead of doing the task — when that
+# happens we reject the response so the next model in the rotation is tried.
+_PROMPT_ECHO_MARKERS = (
+    "yangilik sarlavhasining tabiiy o'zbekcha tarjimali",
+    "qisqa xulosa, maksimal 2 ta qisqa gap",
+    "batafsil tavsif, maksimal 5 ta gap",
+)
+
 # DeepSeek web / free-provider footers appended to some responses
 _WATERMARKS = (
     "This response is AI-generated, for reference only.",
@@ -233,6 +242,15 @@ class BaseAIProvider:
         title_uz = str(data.get("title_uz", "") or "").strip()
         summary_uz = str(data.get("summary_uz", "") or "").strip()
         analysis_uz = str(data.get("analysis_uz", "") or "").strip()
+
+        # Reject schema echoes and empty/invalid output so rotation can retry.
+        joined = f"{title_uz} {summary_uz} {analysis_uz}".lower()
+        if any(marker in joined for marker in _PROMPT_ECHO_MARKERS):
+            raise ValueError("AI echoed the prompt JSON example instead of the news")
+        if not title_uz or not analysis_uz:
+            raise ValueError("AI response missing title_uz/analysis_uz")
+        if len(title_uz) > 300 or "\n" in title_uz:
+            raise ValueError("AI response title_uz is not a single short headline")
 
         return NewsAnalysis(
             title_uz=title_uz,
