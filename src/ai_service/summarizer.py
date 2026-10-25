@@ -73,13 +73,13 @@ class BaseAIProvider:
             content=content[:4000],
         )
         system = load_prompt("system_analyze")
-        text = await self.generate(prompt, system=system, json_mode=True)
+        text = await self.generate(prompt, system=system, json_mode=True, max_tokens=2048)
         try:
             return self._parse_analysis(text)
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning("JSON parse failed for analysis, retrying once: %s", e)
             retry_prompt = prompt + "\n\nESLATMA: Oldingi javob noto'g'ri JSON edi. FAQAT to'g'ri JSON qaytaring, markdown va izoh yo'q."
-            text = await self.generate(retry_prompt, system=system, json_mode=True)
+            text = await self.generate(retry_prompt, system=system, json_mode=True, max_tokens=2048)
             return self._parse_analysis(text)
 
     async def generate_digest(self, news_items: list[dict]) -> list[dict]:
@@ -90,13 +90,13 @@ class BaseAIProvider:
         )
         prompt = load_prompt("digest").format(news_items=items_text)
         system = load_prompt("system_digest")
-        text = await self.generate(prompt, system=system, json_mode=True)
+        text = await self.generate(prompt, system=system, json_mode=True, max_tokens=2048)
         try:
             return self._parse_digest(text)
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning("JSON parse failed for digest, retrying once: %s", e)
             retry_prompt = prompt + "\n\nESLATMA: Oldingi javob noto'g'ri JSON edi. FAQAT to'g'ri JSON qaytaring, markdown va izoh yo'q."
-            text = await self.generate(retry_prompt, system=system, json_mode=True)
+            text = await self.generate(retry_prompt, system=system, json_mode=True, max_tokens=2048)
             return self._parse_digest(text)
 
     # ------------------------------------------------------------------
