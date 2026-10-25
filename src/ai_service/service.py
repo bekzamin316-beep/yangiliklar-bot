@@ -192,6 +192,8 @@ class AIService:
         # AI prompt already requires Uzbek output. Only translate if the model
         # leaked Latin-script text, to avoid wasting tokens/API calls.
         if self.translator:
+            if analysis.title_uz and _needs_translation(analysis.title_uz):
+                analysis.title_uz = await self.translator.translate_to_uzbek(analysis.title_uz)
             if analysis.summary_uz and _needs_translation(analysis.summary_uz):
                 analysis.summary_uz = await self.translator.translate_to_uzbek(analysis.summary_uz)
             if analysis.analysis_uz and _needs_translation(analysis.analysis_uz):
