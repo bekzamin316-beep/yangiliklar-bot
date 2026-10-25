@@ -139,6 +139,23 @@ class BaseAIProvider:
         return await self._post_chat_completions(url, headers, payload)
 
     @staticmethod
+    def _extract_content(data: dict[str, Any]) -> str:
+        """Pull the text out of a chat-completion response.
+
+        Some free/reasoning models return ``content: null`` and put the text in
+        ``reasoning`` / ``reasoning_content`` instead — handle both, and fail
+        loudly (empty response) instead of returning None and crashing later.
+        """
+        choices = data.get("choices") or []
+        message = (choices[0].get("message") if choices else None) or {}
+        text = message.get("content")
+        if not text:
+            text = message.get("reasoning_content") or message.get("reasoning")
+        if not text or not str(text).strip():
+            raise ValueError("Empty AI response (no content/reasoning in message)")
+        return str(text)
+
+    @staticmethod
     def _strip_watermarks(text: str) -> str:
         """Remove provider footer watermarks (e.g. DeepSeek web) from responses."""
         lowered = text.lower()
@@ -162,7 +179,7 @@ class BaseAIProvider:
                 elapsed_ms = (time.monotonic() - start) * 1000
                 resp.raise_for_status()
                 data = resp.json()
-                text = data["choices"][0]["message"]["content"]
+                text = self._extract_content(data)
                 logger.debug("AI response in %.0fms, model=%s", elapsed_ms, self.model)
                 return self._strip_watermarks(text)
         except httpx.TimeoutException as e:
@@ -177,7 +194,7 @@ class BaseAIProvider:
                         resp = await client.post(url, headers=headers, json=payload)
                         resp.raise_for_status()
                         data = resp.json()
-                        return self._strip_watermarks(data["choices"][0]["message"]["content"])
+                        return self._strip_watermarks(self._extract_content(data))
                 except Exception as retry_e:
                     logger.error("AI retry after 429 also failed: %s", retry_e)
                     raise
