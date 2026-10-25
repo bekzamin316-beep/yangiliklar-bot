@@ -69,14 +69,29 @@ class TranslationService:
         if isinstance(provider, DashScopeProvider):
             chain: list[str] = []
             backup = (settings.ai_model_backup or "").strip()
-            if backup:
+            # Only prepend the backup model when it is a DashScope-style slug:
+            # OpenRouter slugs ("vendor/model:free") would 404 on MaaS.
+            if backup and "/" not in backup:
                 chain.append(backup)
             for m in settings.effective_model_list:
+                if "/" in m:
+                    continue
                 if m and m not in chain:
                     chain.append(m)
             return chain or ["qwen-plus"]
         if isinstance(provider, OmniRouteProvider):
             return [settings.ai_model_backup or settings.ai_model]
+        if isinstance(provider, OpenRouterProvider):
+            # OpenRouter only accepts "vendor/model" slugs, so build its chain
+            # from the dedicated free-model list (plus the backup model).
+            chain = []
+            candidates = [settings.ai_model_backup]
+            candidates += [m.strip() for m in (settings.openrouter_free_models or "").split(",")]
+            candidates += settings.effective_model_list
+            for m in candidates:
+                if m and "/" in m and m not in chain:
+                    chain.append(m)
+            return chain or [settings.ai_model]
         return settings.effective_model_list or [settings.ai_model]
 
     # Chars per request chunk (~600 tokens). Small enough that the translated
