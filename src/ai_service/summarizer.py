@@ -25,6 +25,14 @@ _PROMPT_ECHO_MARKERS = (
     "yangilik sarlavhasining tabiiy o'zbekcha tarjimali",
     "qisqa xulosa, maksimal 2 ta qisqa gap",
     "batafsil tavsif, maksimal 5 ta gap",
+    # Model leaked its chain-of-thought / meta commentary into a field
+    "the user wants",
+    "the user asks",
+    "let me ",
+    "i need to",
+    "here's",
+    "rules:",
+    "the text is about",
 )
 
 # DeepSeek web / free-provider footers appended to some responses
@@ -246,7 +254,7 @@ class BaseAIProvider:
         # Reject schema echoes and empty/invalid output so rotation can retry.
         joined = f"{title_uz} {summary_uz} {analysis_uz}".lower()
         if any(marker in joined for marker in _PROMPT_ECHO_MARKERS):
-            raise ValueError("AI echoed the prompt JSON example instead of the news")
+            raise ValueError("AI echoed prompt/reasoning text instead of the news")
         if not title_uz or not analysis_uz:
             raise ValueError("AI response missing title_uz/analysis_uz")
         if len(title_uz) > 300 or "\n" in title_uz:

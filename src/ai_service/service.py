@@ -42,6 +42,21 @@ def _needs_translation(text: str | None) -> bool:
     return any(marker in lowered.split() for marker in english_markers)
 
 
+_REASONING_MARKERS = (
+    "the user wants", "the user asks", "the user is", "let me", "i need to",
+    "here's", "step 1", "steps:", "rules:", "the text is about",
+    "the output", "as an ai", "translation:", "i will",
+)
+
+
+def _looks_like_reasoning(text: str | None) -> bool:
+    """Return True when a field contains model reasoning/meta text instead of news."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _REASONING_MARKERS)
+
+
 class AIService:
     """AI service with model-level fallback — tries each model before giving up."""
 
@@ -198,6 +213,20 @@ class AIService:
                 analysis.summary_uz = await self.translator.translate_to_uzbek(analysis.summary_uz)
             if analysis.analysis_uz and _needs_translation(analysis.analysis_uz):
                 analysis.analysis_uz = await self.translator.translate_to_uzbek(analysis.analysis_uz)
+
+        # Last-resort cleanup: if a model leaked its reasoning/meta text (or the
+        # translator failed and English remained), degrade gracefully instead of
+        # publishing non-Uzbek text in the channel.
+        if _looks_like_reasoning(analysis.title_uz):
+            analysis.title_uz = ""
+        if _looks_like_reasoning(analysis.summary_uz):
+            analysis.summary_uz = ""
+        if _looks_like_reasoning(analysis.analysis_uz):
+            analysis.analysis_uz = ""
+        if analysis.summary_uz and _needs_translation(analysis.summary_uz) and not _needs_translation(analysis.title_uz):
+            analysis.summary_uz = analysis.title_uz
+        if analysis.analysis_uz and _needs_translation(analysis.analysis_uz):
+            analysis.analysis_uz = analysis.summary_uz or analysis.title_uz
 
         # Fallback title if AI didn't provide one
         if not analysis.title_uz.strip() and original_title:
