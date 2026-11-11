@@ -1,7 +1,8 @@
 name: Render failover
 
 # Railway (asosiy) ishlamay qolsa — masalan bepul trial tugagach — Render (zaxira)
-# avtomatik yoqiladi. Har 15 daqiqada Railway /health tekshiriladi.
+# avtomatik yoqiladi. Railway sog'lom bo'lsa, Render avtomatik to'xtatiladi.
+# Har 15 daqiqada tekshiriladi.
 #
 # Qo'lda yoqish: Actions -> "Render failover" -> Run workflow -> force = true
 
@@ -30,31 +31,46 @@ env:
 jobs:
   failover:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
-      - name: Railway holatini tekshirish (6 urinish)
+      - name: Railway holatini tekshirish (2 bosqich)
         id: rail
         if: ${{ !inputs.force }}
         run: |
-          alive=0
-          for i in 1 2 3 4 5 6; do
-            code=$(curl -s -o /dev/null -m 20 -w "%{http_code}" "$RAILWAY_HEALTH" || echo 000)
-            echo "urinish $i: HTTP $code"
-            if [ "$code" = "200" ]; then alive=$((alive+1)); fi
-            sleep 20
-          done
-          echo "muvaffaqiyatli javoblar: $alive/6"
+          check() {
+            local alive=0 code
+            for i in $(seq 1 "$1"); do
+              code=$(curl -s -o /dev/null -m 20 -w "%{http_code}" "$RAILWAY_HEALTH" || echo 000)
+              echo "  urinish $i: HTTP $code"
+              if [ "$code" = "200" ]; then alive=$((alive+1)); fi
+              sleep 20
+            done
+            echo "$alive"
+          }
+
+          echo "1-bosqich (2 daqiqa):"
+          alive=$(check 6)
+          echo "javoblar: $alive/6"
+
+          if [ "$alive" -eq 0 ]; then
+            # Deploy/restart kabi qisqa uzilishlarni istisno qilish uchun 2 daqiqa kutamiz
+            echo "2-bosqich: 2 daqiqadan keyin qayta tekshirish..."
+            sleep 120
+            alive=$(check 3)
+            echo "javoblar: $alive/3"
+          fi
+
           if [ "$alive" -gt 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Railway ishlayapti — hech narsa qilinmadi."
+            echo "Railway ishlayapti."
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "::warning::Railway javob bermayapti — Render'ga o'tiladi"
           fi
 
-      - name: Render holatini tekshirish
+      - name: Render holati
         id: render
-        if: ${{ inputs.force || steps.rail.outputs.skip == 'false' }}
+        if: ${{ always() }}
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
@@ -62,15 +78,25 @@ jobs:
                  -H "Authorization: Bearer $RENDER_API_KEY")
           suspended=$(echo "$svc" | python3 -c "import json,sys; d=json.load(sys.stdin); s=d.get('service',d); print(s.get('suspended',''))" 2>/dev/null || echo "unknown")
           echo "Render holati: $suspended"
-          if [ "$suspended" = "not_suspended" ]; then
-            echo "resumed=false" >> "$GITHUB_OUTPUT"
-            echo "Render allaqachon ishlayapti — qayta yoqilmadi."
-          else
-            echo "resumed=true" >> "$GITHUB_OUTPUT"
-          fi
+          echo "suspended=$suspended" >> "$GITHUB_OUTPUT"
 
-      - name: Render'ni yoqish
-        if: ${{ steps.render.outputs.resumed == 'true' }}
+      # ── Holat 1: Railway sog'lom → Render to'xtatiladi (ikki bot bo'lmasin) ──
+      - name: Render'ni to'xtatish (Railway sog'lom)
+        id: suspend
+        if: ${{ steps.rail.outputs.skip == 'true' && steps.render.outputs.suspended == 'not_suspended' }}
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          code=$(curl -s -m 60 -o /dev/null -w "%{http_code}" -X POST \
+            "https://api.render.com/v1/services/$RENDER_SERVICE/suspend" \
+            -H "Authorization: Bearer $RENDER_API_KEY")
+          echo "suspend HTTP $code"
+          echo "done=true" >> "$GITHUB_OUTPUT"
+
+      # ── Holat 2: Railway o'chgan → Render yoqiladi ──
+      - name: Render'ni yoqish (Railway o'chgan)
+        id: resume
+        if: ${{ steps.rail.outputs.skip == 'false' && steps.render.outputs.suspended != 'not_suspended' }}
         env:
           RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
         run: |
@@ -79,9 +105,10 @@ jobs:
             -H "Authorization: Bearer $RENDER_API_KEY")
           echo "resume HTTP $code"
           [ "$code" = "202" ] || [ "$code" = "200" ] || { echo "::error::Render resume xato ($code)"; exit 1; }
+          echo "done=true" >> "$GITHUB_OUTPUT"
 
       - name: Render ishga tushishini kutish (5 daqiqagacha)
-        if: ${{ steps.render.outputs.resumed == 'true' }}
+        if: ${{ steps.resume.outputs.done == 'true' }}
         run: |
           for i in $(seq 1 15); do
             code=$(curl -s -o /dev/null -m 20 -w "%{http_code}" "$RENDER_HEALTH" || echo 000)
@@ -95,15 +122,25 @@ jobs:
           echo "::error::Render 5 daqiqada javob bermadi"
           exit 1
 
-      - name: Adminga xabar (Telegram)
-        if: ${{ success() && steps.render.outputs.resumed == 'true' }}
+      - name: Adminga xabar (Render yoqildi)
+        if: ${{ success() && steps.resume.outputs.done == 'true' }}
         env:
           TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TG_CHAT: ${{ secrets.ADMIN_CHAT_ID }}
         run: |
           curl -s -m 20 -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
             -d chat_id="$TG_CHAT" \
-            --data-urlencode "text=🔄 Avtomatik o'tish bajarildi: Railway javob bermadi, bot Render'da ishga tushdi. Health: $RENDER_HEALTH"
+            --data-urlencode "text=🔄 Railway javob bermadi — bot Render'da avtomatik ishga tushdi. Health: $RENDER_HEALTH"
+
+      - name: Adminga xabar (Render to'xtatildi)
+        if: ${{ success() && steps.suspend.outputs.done == 'true' }}
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          curl -s -m 20 -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            -d chat_id="$TG_CHAT" \
+            --data-urlencode "text=✅ Railway sog'lom — Render avtomatik to'xtatildi (ikki bot birga ishlamasligi uchun)."
 
       - name: Natija
         if: always()
@@ -113,4 +150,6 @@ jobs:
           echo "| Qadam | Natija |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Railway ishlayaptimi | ${{ steps.rail.outputs.skip == 'true' && 'ha ✅' || 'yoq ❌' }} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Render yoqildimi | ${{ steps.render.outputs.resumed == 'true' && 'ha' || 'yoq' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Render holati (oldin) | ${{ steps.render.outputs.suspended }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Render yoqildimi | ${{ steps.resume.outputs.done == 'true' && 'ha' || 'yoq' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Render to'xtatildimi | ${{ steps.suspend.outputs.done == 'true' && 'ha' || 'yoq' }} |" >> "$GITHUB_STEP_SUMMARY"
