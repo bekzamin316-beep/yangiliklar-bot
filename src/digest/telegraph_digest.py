@@ -152,10 +152,18 @@ class TelegraphDigestService:
         return list(items)
 
     async def _rewrite_news(self, news_items: list) -> list[dict]:
-        """Fetch original content and rewrite all items via AI."""
+        """Build digest items — via AI rewrite or from the existing analysis.
+
+        When ``settings.digest_ai_rewrite`` is False the per-item AI call is
+        skipped entirely: the Uzbek title/summary/analysis already produced by
+        the collection pipeline is reused. That keeps a digest at 1 AI request
+        (the market summary) instead of 1 request per news item.
+        """
+        ai_rewrite = bool(settings.digest_ai_rewrite)
         fetcher = ContentFetcher()
         try:
-            source_contents = await fetcher.fetch_all_sources(news_items)
+            # Full article text is only needed when the AI rewrites the item.
+            source_contents = await fetcher.fetch_all_sources(news_items) if ai_rewrite else {}
 
             # Prefer images captured from RSS (media:content / enclosure);
             # fall back to extracting og:image from the article page.
@@ -167,7 +175,7 @@ class TelegraphDigestService:
                     images[item.id] = rss_img
                 else:
                     missing_img.append(item)
-            if missing_img:
+            if missing_img and ai_rewrite:
                 try:
                     images.update(await fetcher.fetch_all_images(missing_img))
                 except Exception as e:
@@ -195,6 +203,13 @@ class TelegraphDigestService:
                         "tags": item.tags or "",
                     },
                 })
+
+            if not ai_rewrite:
+                logger.info(
+                    "AI rewrite disabled — reusing stored analysis for %d items",
+                    len(rewrite_items),
+                )
+                return self.rewriter.reuse_analysis(rewrite_items)
 
             return await self.rewriter.rewrite_many(rewrite_items)
         finally:

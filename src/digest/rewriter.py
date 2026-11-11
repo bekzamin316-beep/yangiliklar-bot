@@ -66,6 +66,14 @@ class DigestRewriter:
                 rewritten.append(result)
         return rewritten
 
+    def reuse_analysis(self, items: list[dict]) -> list[dict]:
+        """Build digest items from the analysis already stored with each news item.
+
+        No AI request is made — used when ``DIGEST_AI_REWRITE=false`` so one
+        digest costs a single AI call (the market summary) instead of one per item.
+        """
+        return [self._fallback_item(item) for item in items]
+
     async def rewrite_news(self, item: dict) -> dict:
         """Rewrite a single news item into the full digest structure.
 

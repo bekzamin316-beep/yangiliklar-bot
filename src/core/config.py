@@ -181,6 +181,13 @@ class Settings(BaseSettings):
     telegraph_author_name: str = Field("cripto7yangilik", description="Telegraph page author name")
     telegraph_author_url: str = Field("https://t.me/cripto7yangilik", description="Telegraph page author URL (optional)")
     digest_max_items: int = Field(12, description="Max news items included in one Telegraph digest page")
+    digest_ai_rewrite: bool = Field(
+        True,
+        description=(
+            "True = each digest item is rewritten by AI (detailed, costs 1 AI request per item). "
+            "False = reuse the Uzbek analysis already produced during collection (1 AI request per digest)"
+        ),
+    )
 
     # Telegram Client (Telethon) — for reading channel posts in digest
     telegram_api_id: int = Field(0, description="Telegram API ID from my.telegram.org")
