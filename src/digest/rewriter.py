@@ -236,14 +236,18 @@ class DigestRewriter:
             if first_tag:
                 category = first_tag[:40]
 
+        # The stored analysis is shown once under "AI tahlili"; do not repeat it
+        # under "Batafsil sharh" or "Muhim faktlar".
+        commentary_uz = "" if analysis_uz else summary_uz
+
         return {
             "title_uz": title_uz,
             "summary_uz": summary_uz,
-            "commentary_uz": analysis_uz,
+            "commentary_uz": commentary_uz,
             "analysis_uz": analysis_uz,
             "teaser_uz": summary_uz or title_uz,
             "emoji": _SENTIMENT_EMOJI.get(sentiment, "🔹"),
-            "key_facts": [summary_uz[:160]],
+            "key_facts": [],
             "sentiment": sentiment,
             "category": category,
             "source_url": str(item.get("source_url", "") or "").strip(),
