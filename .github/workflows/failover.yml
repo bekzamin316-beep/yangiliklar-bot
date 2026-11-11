@@ -1,0 +1,116 @@
+name: Render failover
+
+# Railway (asosiy) ishlamay qolsa — masalan bepul trial tugagach — Render (zaxira)
+# avtomatik yoqiladi. Har 15 daqiqada Railway /health tekshiriladi.
+#
+# Qo'lda yoqish: Actions -> "Render failover" -> Run workflow -> force = true
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Railway holatini tekshirmasdan Render'ni yoqish"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-failover
+  cancel-in-progress: false
+
+env:
+  RAILWAY_HEALTH: https://yangiliklar-bot-production.up.railway.app/health
+  RENDER_HEALTH: https://crypto-news-bot-lf0w.onrender.com/health
+  RENDER_SERVICE: srv-db366g942hec738n7810
+
+jobs:
+  failover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Railway holatini tekshirish (6 urinish)
+        id: rail
+        if: ${{ !inputs.force }}
+        run: |
+          alive=0
+          for i in 1 2 3 4 5 6; do
+            code=$(curl -s -o /dev/null -m 20 -w "%{http_code}" "$RAILWAY_HEALTH" || echo 000)
+            echo "urinish $i: HTTP $code"
+            if [ "$code" = "200" ]; then alive=$((alive+1)); fi
+            sleep 20
+          done
+          echo "muvaffaqiyatli javoblar: $alive/6"
+          if [ "$alive" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Railway ishlayapti — hech narsa qilinmadi."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Railway javob bermayapti — Render'ga o'tiladi"
+          fi
+
+      - name: Render holatini tekshirish
+        id: render
+        if: ${{ inputs.force || steps.rail.outputs.skip == 'false' }}
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          svc=$(curl -s -m 30 "https://api.render.com/v1/services/$RENDER_SERVICE" \
+                 -H "Authorization: Bearer $RENDER_API_KEY")
+          suspended=$(echo "$svc" | python3 -c "import json,sys; d=json.load(sys.stdin); s=d.get('service',d); print(s.get('suspended',''))" 2>/dev/null || echo "unknown")
+          echo "Render holati: $suspended"
+          if [ "$suspended" = "not_suspended" ]; then
+            echo "resumed=false" >> "$GITHUB_OUTPUT"
+            echo "Render allaqachon ishlayapti — qayta yoqilmadi."
+          else
+            echo "resumed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Render'ni yoqish
+        if: ${{ steps.render.outputs.resumed == 'true' }}
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          code=$(curl -s -m 60 -o /dev/null -w "%{http_code}" -X POST \
+            "https://api.render.com/v1/services/$RENDER_SERVICE/resume" \
+            -H "Authorization: Bearer $RENDER_API_KEY")
+          echo "resume HTTP $code"
+          [ "$code" = "202" ] || [ "$code" = "200" ] || { echo "::error::Render resume xato ($code)"; exit 1; }
+
+      - name: Render ishga tushishini kutish (5 daqiqagacha)
+        if: ${{ steps.render.outputs.resumed == 'true' }}
+        run: |
+          for i in $(seq 1 15); do
+            code=$(curl -s -o /dev/null -m 20 -w "%{http_code}" "$RENDER_HEALTH" || echo 000)
+            echo "render urinish $i: HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "::notice::Render ishga tushdi ✅"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::Render 5 daqiqada javob bermadi"
+          exit 1
+
+      - name: Adminga xabar (Telegram)
+        if: ${{ success() && steps.render.outputs.resumed == 'true' }}
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.ADMIN_CHAT_ID }}
+        run: |
+          curl -s -m 20 -o /dev/null "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+            -d chat_id="$TG_CHAT" \
+            --data-urlencode "text=🔄 Avtomatik o'tish bajarildi: Railway javob bermadi, bot Render'da ishga tushdi. Health: $RENDER_HEALTH"
+
+      - name: Natija
+        if: always()
+        run: |
+          echo "### Failover natijasi" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Qadam | Natija |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Railway ishlayaptimi | ${{ steps.rail.outputs.skip == 'true' && 'ha ✅' || 'yoq ❌' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Render yoqildimi | ${{ steps.render.outputs.resumed == 'true' && 'ha' || 'yoq' }} |" >> "$GITHUB_STEP_SUMMARY"
