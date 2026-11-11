@@ -1,0 +1,62 @@
+name: Render keep-alive
+
+# Render bepul servisi 15 daqiqa harakatsizlikdan keyin uxlaydi.
+# Bot o'zi har 10 daqiqada /health ga ping yuboradi, bu esa qo'shimcha tashqi
+# qatlam: har 10 daqiqada GitHub Actions'dan ham ping yuboriladi.
+#
+# Render suspended bo'lsa — ping yuborilmaydi (ataylab o'chirilgan bo'ladi).
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-keepalive
+  cancel-in-progress: false
+
+env:
+  RENDER_SERVICE: srv-db366g942hec738n7810
+  RENDER_HEALTH: https://crypto-news-bot-lf0w.onrender.com/health
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Render holatini tekshirish
+        id: st
+        env:
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          svc=$(curl -s -m 30 "https://api.render.com/v1/services/$RENDER_SERVICE" \
+                 -H "Authorization: Bearer $RENDER_API_KEY")
+          suspended=$(echo "$svc" | python3 -c "import json,sys; d=json.load(sys.stdin); s=d.get('service',d); print(s.get('suspended',''))" 2>/dev/null || echo "unknown")
+          echo "Render holati: $suspended"
+          echo "suspended=$suspended" >> "$GITHUB_OUTPUT"
+
+      - name: Ping (faqat servis ishlayotgan bo'lsa)
+        if: ${{ steps.st.outputs.suspended == 'not_suspended' }}
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -m 30 -w "%{http_code}" "$RENDER_HEALTH" || echo 000)
+            echo "ping $i: HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "Render uyg'oq ✅"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::warning::Render 3 urinishda 200 qaytarmadi (uyqudan uyg'onmoqda bo'lishi mumkin)"
+
+      - name: Natija
+        if: always()
+        run: |
+          if [ "${{ steps.st.outputs.suspended }}" = "not_suspended" ]; then
+            echo "Render ishlayapti — ping yuborildi." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Render suspended — ping yuborilmadi (kerak emas)." >> "$GITHUB_STEP_SUMMARY"
+          fi
