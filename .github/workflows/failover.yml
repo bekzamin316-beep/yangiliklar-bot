@@ -41,7 +41,7 @@ jobs:
             local alive=0 code
             for i in $(seq 1 "$1"); do
               code=$(curl -s -o /dev/null -m 20 -w "%{http_code}" "$RAILWAY_HEALTH" || echo 000)
-              echo "  urinish $i: HTTP $code"
+              echo "  urinish $i: HTTP $code" >&2
               if [ "$code" = "200" ]; then alive=$((alive+1)); fi
               sleep 20
             done
@@ -52,12 +52,16 @@ jobs:
           alive=$(check 6)
           echo "javoblar: $alive/6"
 
+          # Xavfsizlik: agar qiymat raqam bo'lmasa — Railway ishlayapti deb hisoblaymiz
+          case "$alive" in ''|*[!0-9]*) alive=1 ;; esac
+
           if [ "$alive" -eq 0 ]; then
             # Deploy/restart kabi qisqa uzilishlarni istisno qilish uchun 2 daqiqa kutamiz
             echo "2-bosqich: 2 daqiqadan keyin qayta tekshirish..."
             sleep 120
             alive=$(check 3)
             echo "javoblar: $alive/3"
+            case "$alive" in ''|*[!0-9]*) alive=1 ;; esac
           fi
 
           if [ "$alive" -gt 0 ]; then
