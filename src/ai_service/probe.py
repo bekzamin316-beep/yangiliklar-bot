@@ -9,7 +9,12 @@ import asyncio
 import logging
 
 from src.ai_service import model_health
-from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
+from src.ai_service.summarizer import (
+    DashScopeProvider,
+    MillionSeekProvider,
+    OmniRouteProvider,
+    OpenRouterProvider,
+)
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -22,6 +27,8 @@ PROBE_TIMEOUT = 25
 def _build_provider():
     """Instantiate the provider matching the resolved AI_PROVIDER."""
     provider = settings.effective_provider
+    if provider == "millionseek":
+        return MillionSeekProvider()
     if provider == "openrouter":
         return OpenRouterProvider()
     if provider == "omniroute":

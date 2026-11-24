@@ -5,7 +5,13 @@ import re
 
 from src.ai_service import model_health
 from src.ai_service.prompt_loader import load_prompt
-from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
+from src.ai_service.summarizer import (
+    DashScopeProvider,
+    MillionSeekProvider,
+    MistralProvider,
+    OmniRouteProvider,
+    OpenRouterProvider,
+)
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -37,6 +43,15 @@ class TranslationService:
         # explicitly keyed, so a dead/unconfigured router never adds latency.
         if settings.omniroute_api_key and "omniroute" not in names:
             names.append("omniroute")
+        # Mistral is the last-resort translator when the free quotas run out.
+        if settings.mistral_api_key and "mistral" not in names:
+            names.append("mistral")
+        # MillionSeek goes first when keyed: huge daily quota, so it should
+        # carry the bulk of the translation work.
+        if settings.millionseek_api_key and "millionseek" in names:
+            names.remove("millionseek")
+        if settings.millionseek_api_key:
+            names.insert(0, "millionseek")
 
         self.providers: list = []
         for name in names:
@@ -57,6 +72,14 @@ class TranslationService:
             if not settings.dashscope_api_key:
                 return None
             return DashScopeProvider()
+        if provider_name == "mistral":
+            if not settings.mistral_api_key:
+                return None
+            return MistralProvider()
+        if provider_name == "millionseek":
+            if not settings.millionseek_api_key:
+                return None
+            return MillionSeekProvider()
         return None
 
     @staticmethod
@@ -81,6 +104,12 @@ class TranslationService:
             return chain or ["qwen-plus"]
         if isinstance(provider, OmniRouteProvider):
             return [settings.ai_model_backup or settings.ai_model]
+        if isinstance(provider, MistralProvider):
+            models = [m.strip() for m in (settings.mistral_models or "").split(",") if m.strip()]
+            return models or ["mistral-small-latest"]
+        if isinstance(provider, MillionSeekProvider):
+            models = [m.strip() for m in (settings.millionseek_models or "").split(",") if m.strip()]
+            return models or ["deepseek-v4.1-flash-free"]
         if isinstance(provider, OpenRouterProvider):
             # OpenRouter only accepts "vendor/model" slugs, so build its chain
             # from the dedicated free-model list (plus the backup model).

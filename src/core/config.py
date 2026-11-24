@@ -113,6 +113,28 @@ class Settings(BaseSettings):
         description="Comma-separated list of free models",
     )
 
+    # Mistral La Plateforme (OpenAI-compatible, free "Experiment" tier)
+    mistral_api_key: str = Field("", description="Mistral API key (empty = disabled)")
+    mistral_api_base: str = Field(
+        "https://api.mistral.ai/v1",
+        description="Mistral API base URL",
+    )
+    mistral_models: str = Field(
+        "mistral-small-latest,ministral-8b-latest",
+        description="Comma-separated Mistral models for the fallback chain",
+    )
+
+    # MillionSeek (OpenAI-compatible gateway, huge free daily quota)
+    millionseek_api_key: str = Field("", description="MillionSeek API key (empty = disabled)")
+    millionseek_api_base: str = Field(
+        "https://100milionseek.top/v1",
+        description="MillionSeek API base URL",
+    )
+    millionseek_models: str = Field(
+        "deepseek-v4.1-flash-free",
+        description="Comma-separated MillionSeek chat models (``jev-*`` is a judge model, not chat)",
+    )
+
     # OmniRoute (self-hosted OpenAI-compatible LLM router on Railway)
     omniroute_api_base: str = Field(
         "https://omniroute-production-8602.up.railway.app/v1",
@@ -269,6 +291,12 @@ class Settings(BaseSettings):
             incompatible = legacy or foreign or not self.openrouter_api_key
             if incompatible and self.dashscope_api_key:
                 return "dashscope"
+        if self.ai_provider == "millionseek" and not self.millionseek_api_key:
+            # Key missing — fall back so a stale env var can't break the bot
+            if self.openrouter_api_key:
+                return "openrouter"
+            if self.dashscope_api_key:
+                return "dashscope"
         return self.ai_provider
 
     @cached_property
@@ -278,6 +306,9 @@ class Settings(BaseSettings):
         Keeps the configured slugs when they are already DashScope-shaped;
         swaps in the built-in DashScope rotation only for dead legacy lists.
         """
+        if self.effective_provider == "millionseek":
+            models = [m.strip() for m in (self.millionseek_models or "").split(",") if m.strip()]
+            return models or ["deepseek-v4.1-flash-free"]
         if self.effective_provider == "dashscope" and self.ai_provider != "dashscope":
             legacy, _ = self._rotation_shape
             models = self.ai_models_list

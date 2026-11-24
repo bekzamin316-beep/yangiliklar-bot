@@ -12,6 +12,7 @@ from typing import Any
 
 from src.ai_service.prompt_loader import load_prompt
 from src.ai_service.service import AIService
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -137,9 +138,21 @@ class DigestRewriter:
         providers = [self.ai_service.primary]
         if self.ai_service.backup is not None:
             providers.append(self.ai_service.backup)
+        tertiary = getattr(self.ai_service, "tertiary", None)
+        if tertiary is not None:
+            providers.append(tertiary)
 
         for provider in providers:
-            for model in models:
+            chain = models
+            pname = type(provider).__name__
+            if pname == "MistralProvider":
+                chain = list(getattr(self.ai_service, "_tertiary_models", []) or [tertiary.model])
+            elif pname == "MillionSeekProvider":
+                chain = [m.strip() for m in (settings.millionseek_models or "").split(",") if m.strip()]
+                chain = chain or ["deepseek-v4.1-flash-free"]
+            elif pname == "OpenRouterProvider":
+                chain = [m for m in models if "/" in m] or models
+            for model in chain:
                 try:
                     provider.model = model
                     return await provider.generate(prompt, system=system, max_tokens=max_tokens, json_mode=True)

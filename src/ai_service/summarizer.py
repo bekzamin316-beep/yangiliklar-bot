@@ -538,3 +538,54 @@ class OmniRouteProvider(BaseAIProvider):
         except Exception as e:
             logger.error("OmniRoute unexpected error: %s", e)
             raise
+
+
+class MistralProvider(BaseAIProvider):
+    """Mistral La Plateforme provider (OpenAI-compatible API).
+
+    Used as the last-resort fallback when both the primary rotation and the
+    backup provider fail — e.g. when the OpenRouter free daily quota is
+    exhausted mid-day.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._api_base = settings.mistral_api_base
+        self._api_key = settings.mistral_api_key
+
+    @property
+    def api_base(self) -> str:
+        return self._api_base
+
+    @property
+    def api_key(self) -> str:
+        return self._api_key
+
+    async def _before_request(self) -> None:
+        # Mistral free tier allows ~1 req/s — keep a polite gap to avoid 429s
+        await asyncio.sleep(1.5)
+
+
+class MillionSeekProvider(BaseAIProvider):
+    """MillionSeek gateway provider (OpenAI-compatible, huge free daily quota).
+
+    Serves ``deepseek-v4.1-flash-free`` and a judge model. Used as the primary
+    provider so the OpenRouter 50/day free cap never blocks the bot.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._api_base = settings.millionseek_api_base
+        self._api_key = settings.millionseek_api_key
+
+    @property
+    def api_base(self) -> str:
+        return self._api_base
+
+    @property
+    def api_key(self) -> str:
+        return self._api_key
+
+    async def _before_request(self) -> None:
+        # Gentle spacing: one digest can rewrite many items back-to-back.
+        await asyncio.sleep(0.4)

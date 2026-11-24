@@ -9,7 +9,13 @@ from src.core.config import settings
 from src.ai_service import model_health
 from src.ai_service.models import NewsAnalysis
 from src.ai_service.rate_limit import ModelDailyLimiter
-from src.ai_service.summarizer import DashScopeProvider, OmniRouteProvider, OpenRouterProvider
+from src.ai_service.summarizer import (
+    DashScopeProvider,
+    MillionSeekProvider,
+    MistralProvider,
+    OmniRouteProvider,
+    OpenRouterProvider,
+)
 from src.ai_service.translation import TranslationService
 
 logger = logging.getLogger(__name__)
@@ -64,7 +70,9 @@ class AIService:
         # Choose provider based on resolved config (legacy OpenRouter free-tier
         # lists auto-switch to DashScope when a DashScope key is available)
         provider_name = settings.effective_provider
-        if provider_name == "openrouter":
+        if provider_name == "millionseek":
+            self.primary = MillionSeekProvider()
+        elif provider_name == "openrouter":
             self.primary = OpenRouterProvider()
         elif provider_name == "omniroute":
             self.primary = OmniRouteProvider()
@@ -74,19 +82,35 @@ class AIService:
         # Backup provider (if configured) — otherwise auto-fallback to DashScope
         # when its key is set, so a rate-limited primary never blocks the bot.
         if settings.ai_backup_api_key:
-            if settings.ai_backup_provider == "openrouter":
+            if settings.ai_backup_provider == "millionseek":
+                self.backup = MillionSeekProvider()
+                if settings.millionseek_models:
+                    self.backup.model = settings.millionseek_models.split(",")[0].strip()
+            elif settings.ai_backup_provider == "openrouter":
                 self.backup = OpenRouterProvider()
             elif settings.ai_backup_provider == "omniroute":
                 self.backup = OmniRouteProvider()
             else:
                 self.backup = DashScopeProvider()
-            if settings.ai_model_backup:
+            # Only override the backup model when it is not a dedicated
+            # provider with its own model namespace (MillionSeek).
+            if settings.ai_model_backup and settings.ai_backup_provider != "millionseek":
                 self.backup.model = settings.ai_model_backup
         elif settings.dashscope_api_key and provider_name != "dashscope":
             self.backup = DashScopeProvider()
             self.backup.model = settings.ai_model_backup or "qwen-plus"
         else:
             self.backup = None
+
+        # Tertiary provider — last resort when the primary rotation AND the
+        # backup provider are exhausted (e.g. OpenRouter free quota at 50/day).
+        self.tertiary = None
+        if settings.mistral_api_key:
+            self.tertiary = MistralProvider()
+            models = [m.strip() for m in settings.mistral_models.split(",") if m.strip()]
+            if models:
+                self.tertiary.model = models[0]
+            self._tertiary_models = models or ["mistral-small-latest"]
 
         # Translator — always uses DashScope qwen-turbo for reliability
         self.translator = TranslationService() if settings.enable_translation else None
@@ -297,6 +321,21 @@ class AIService:
                 return analysis
             except Exception as e2:
                 logger.error("Backup AI provider also failed: %s", e2)
+
+        # Step 3b: Try the tertiary provider (Mistral) with its own model chain
+        if self.tertiary:
+            for model in getattr(self, "_tertiary_models", []) or [self.tertiary.model]:
+                try:
+                    logger.info("Trying tertiary AI provider (Mistral, %s)...", model)
+                    self.tertiary.model = model
+                    analysis = await self.tertiary.analyze_news(title, content)
+                    analysis = await self._post_process_analysis(analysis, title)
+                    model_health.record_success(model)
+                    self._advance_rotation()
+                    return analysis
+                except Exception as e3:
+                    model_health.record_error(model, str(e3))
+                    logger.error("Tertiary provider %s failed: %s", model, e3)
 
         # Step 4: Minimal analysis with translation fallback
         self._advance_rotation()
